@@ -4,8 +4,13 @@ import csv
 from datetime import datetime
 import pandas as pd
 import io
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+    st.error("PDF export requires reportlab. Please install it locally.")
 
 # Crear/Conectar a la base de datos SQLite y actualizar esquema
 def iniciar_base_datos():
