@@ -105,8 +105,8 @@ if not st.session_state.logged_in:
     tab1, tab2, tab3 = st.tabs(["Anmelden", "Registrieren", "Tutor Modus"])
 
     with tab1:
-        username = st.text_input("Benutzername")
-        password = st.text_input("Passwort", type="password")
+        username = st.text_input("Benutzername", key="login_username")
+        password = st.text_input("Passwort", type="password", key="login_password")
         if st.button("Anmelden"):
             if username and password:
                 cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
@@ -123,8 +123,8 @@ if not st.session_state.logged_in:
                 st.error("Benutzername und Passwort sind erforderlich.")
 
     with tab2:
-        reg_username = st.text_input("Benutzername")
-        reg_password = st.text_input("Passwort", type="password")
+        reg_username = st.text_input("Benutzername", key="reg_username")
+        reg_password = st.text_input("Passwort", type="password", key="reg_password")
         if st.button("Registrieren"):
             if reg_username and reg_password:
                 try:
@@ -137,8 +137,8 @@ if not st.session_state.logged_in:
                 st.error("Benutzername und Passwort sind erforderlich.")
 
     with tab3:
-        tutor_username = st.text_input("Benutzername")
-        tutor_password = st.text_input("Passwort", type="password")
+        tutor_username = st.text_input("Benutzername", key="tutor_username")
+        tutor_password = st.text_input("Passwort", type="password", key="tutor_password")
         if st.button("Anmelden als Tutor"):
             if tutor_password == "tutor01":
                 st.session_state.logged_in = True
@@ -149,7 +149,11 @@ if not st.session_state.logged_in:
             else:
                 st.error("Ungültiges Passwort für Tutor-Modus.")
 else:
-    st.button("Abmelden", on_click=lambda: st.session_state.clear() or st.rerun())
+    if st.button("Abmelden"):
+        st.session_state.logged_in = False
+        st.session_state.current_user = None
+        st.session_state.is_tutor = False
+        st.rerun()
 
     if not st.session_state.is_tutor:
         st.subheader("Neue Operation hinzufügen")
@@ -208,10 +212,10 @@ else:
     if st.session_state.is_tutor:
         suche_kriterium = st.selectbox("Suchen nach", ["Kategorie", "Datum", "Datum Range", "Benutzer"])
         if suche_kriterium in ["Kategorie", "Datum"]:
-            wert = st.text_input("Wert")
+            wert = st.text_input("Wert", key="suche_wert")
         elif suche_kriterium == "Datum Range":
-            vom = st.text_input("vom (TT.MM.JJJJ)")
-            bis = st.text_input("bis (TT.MM.JJJJ)")
+            vom = st.text_input("vom (TT.MM.JJJJ)", key="vom")
+            bis = st.text_input("bis (TT.MM.JJJJ)", key="bis")
             wert = None
         elif suche_kriterium == "Benutzer":
             cursor.execute("SELECT username FROM users")
@@ -221,7 +225,7 @@ else:
             wert = None
     else:
         suche_kriterium = st.selectbox("Suchen nach", ["Kategorie", "Datum"])
-        wert = st.text_input("Wert")
+        wert = st.text_input("Wert", key="suche_wert_user")
     if st.button("Suchen"):
         suche_eintraege(suche_kriterium, wert, vom if 'vom' in locals() else None, bis if 'bis' in locals() else None)
     if st.button("Alle Einträge anzeigen"):
@@ -243,6 +247,6 @@ else:
             zusammenfassung_kategorien()
     else:
         if st.button("Drucken"):
-            st.markdown('<button onclick="window.print()">Drucken</button>', unsafe_allow_html=True)
+            print_table()
 
 conn.close()
