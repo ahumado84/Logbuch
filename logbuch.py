@@ -95,6 +95,7 @@ def reorganizar_user_ids(current_user):
 
 # App
 st.title("OP Katalog - Hubertus")
+st.caption("Copyright Victor Ahumada Jimenez 2025")
 
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -247,6 +248,6 @@ else:
             zusammenfassung_kategorien()
     else:
         if st.button("Drucken"):
-            print_table()
+            st.markdown('<button onclick="window.print()">Drucken</button>', unsafe_allow_html=True)
 
 conn.close()
