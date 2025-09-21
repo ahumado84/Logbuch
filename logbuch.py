@@ -27,6 +27,13 @@ def iniciar_base_datos():
         )
     ''')
     
+    # Verificar si la columna is_tutor existe y agregarla si no
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [info[1] for info in cursor.fetchall()]
+    if 'is_tutor' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_tutor INTEGER DEFAULT 0")
+        conn.commit()
+    
     # Crear tabla de operationen si no existe
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS operationen (
@@ -104,21 +111,25 @@ def reorganizar_user_ids(current_user):
 # Mostrar todos los registros (filtrados por usuario o todos para tutor)
 def zeige_eintraege():
     if st.session_state.is_tutor:
-        cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen")
+        cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen ORDER BY datum_sort DESC")
         eintraege = cursor.fetchall()
         data = []
         for eintrag in eintraege:
             rolle_display = eintrag[2] if eintrag[2] == "Operateur" else ""
             data.append([eintrag[0], eintrag[1], rolle_display, eintrag[3], eintrag[4], eintrag[5]])
-        df = pd.DataFrame(data, columns=["Datum", "Eingriff", "Rolle", "Patient", "Kategorie", "Benutzer"])
+        if data:
+            df = pd.DataFrame(data, columns=["Datum", "Eingriff", "Rolle", "Patient", "Kategorie", "Benutzer"])
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.write("Keine Einträge vorhanden.")
     else:
         cursor.execute("SELECT user_id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen FROM operationen WHERE username = ? ORDER BY user_id", (st.session_state.current_user,))
         eintraege = cursor.fetchall()
-        df = pd.DataFrame(eintraege, columns=["ID", "Datum", "Eingriff", "Rolle", "Patient", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
-    if not eintraege:
-        st.write("Keine Einträge vorhanden.")
-    else:
-        st.dataframe(df)
+        if eintraege:
+            df = pd.DataFrame(eintraege, columns=["ID", "Datum", "Eingriff", "Rolle", "Patient", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.write("Keine Einträge vorhanden.")
 
 # Buscar registros
 def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
@@ -129,29 +140,33 @@ def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
                 return
             vom_sort = datetime.strptime(vom, '%d.%m.%Y').strftime('%Y-%m-%d')
             bis_sort = datetime.strptime(bis, '%d.%m.%Y').strftime('%Y-%m-%d')
-            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE datum_sort BETWEEN ? AND ?", (vom_sort, bis_sort))
+            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE datum_sort BETWEEN ? AND ? ORDER BY datum_sort DESC", (vom_sort, bis_sort))
         elif suche_kriterium == "Benutzer":
             if not wert:
                 st.error("Bitte wählen Sie einen Benutzer aus.")
                 return
-            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE username = ?", (wert,))
+            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE username = ? ORDER BY datum_sort DESC", (wert,))
         elif suche_kriterium == "Datum":
-            if not validar_fecha(wert):
+            if not wert or not validar_fecha(wert):
                 st.error("Ungültiges Datumsformat. Bitte verwenden Sie TT.MM.JJJJ.")
                 return
             wert_sort = datetime.strptime(wert, '%d.%m.%Y').strftime('%Y-%m-%d')
-            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE datum_sort = ?", (wert_sort,))
+            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE datum_sort = ? ORDER BY datum_sort DESC", (wert_sort,))
         elif suche_kriterium == "Kategorie":
-            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE kategorie = ?", (wert,))
+            cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen WHERE kategorie = ? ORDER BY datum_sort DESC", (wert,))
         eintraege = cursor.fetchall()
         data = []
         for eintrag in eintraege:
             rolle_display = eintrag[2] if eintrag[2] == "Operateur" else ""
             data.append([eintrag[0], eintrag[1], rolle_display, eintrag[3], eintrag[4], eintrag[5]])
-        df = pd.DataFrame(data, columns=["Datum", "Eingriff", "Rolle", "Patient", "Kategorie", "Benutzer"])
+        if data:
+            df = pd.DataFrame(data, columns=["Datum", "Eingriff", "Rolle", "Patient", "Kategorie", "Benutzer"])
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.write("Keine Einträge gefunden.")
     else:
         if suche_kriterium == "Datum":
-            if not validar_fecha(wert):
+            if not wert or not validar_fecha(wert):
                 st.error("Ungültiges Datumsformat. Bitte verwenden Sie TT.MM.JJJJ.")
                 return
             wert_sort = datetime.strptime(wert, '%d.%m.%Y').strftime('%Y-%m-%d')
@@ -159,11 +174,11 @@ def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
         elif suche_kriterium == "Kategorie":
             cursor.execute("SELECT user_id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen FROM operationen WHERE kategorie = ? AND username = ? ORDER BY user_id", (wert, st.session_state.current_user))
         eintraege = cursor.fetchall()
-        df = pd.DataFrame(eintraege, columns=["ID", "Datum", "Eingriff", "Rolle", "Patient", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
-    if not eintraege:
-        st.write("Keine Einträge gefunden.")
-    else:
-        st.dataframe(df)
+        if eintraege:
+            df = pd.DataFrame(eintraege, columns=["ID", "Datum", "Eingriff", "Rolle", "Patient", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.write("Keine Einträge gefunden.")
 
 # Eliminar Eintrag
 def loesche_eintrag():
@@ -185,7 +200,7 @@ def loesche_eintrag():
 # Export CSV
 def exportieren_csv():
     if st.session_state.is_tutor:
-        cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen")
+        cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen ORDER BY datum_sort DESC")
         eintraege = cursor.fetchall()
         output = io.StringIO()
         writer = csv.writer(output)
@@ -195,230 +210,7 @@ def exportieren_csv():
             writer.writerow([eintrag[0], eintrag[1], rolle_display, eintrag[3], eintrag[4], eintrag[5]])
         csv_data = output.getvalue()
     else:
-        cursor.execute("SELECT user_id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen FROM operationen WHERE username = ? ORDER BY user_id", (st.session_state.current_user,))
-        eintraege = cursor.fetchall()
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["ID", "Datum", "Eingriff", "Rolle", "Patienten-ID", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
-        writer.writerows(eintraege)
-        csv_data = output.getvalue()
-    st.download_button("CSV herunterladen", csv_data, "logbuch.csv", "text/csv")
-
-# Export PDF
-def exportieren_pdf():
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    c.setFont("Helvetica", 12)
-    c.drawString(100, 750, "Logbuch - Chirurgischer Bericht")
-    y = 700
-    if st.session_state.is_tutor:
-        cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen")
-        eintraege = cursor.fetchall()
-        for eintrag in eintraege:
-            rolle_display = eintrag[2] if eintrag[2] == "Operateur" else ""
-            text = f"Datum: {eintrag[0]} | Eingriff: {eintrag[1]} | Rolle: {rolle_display} | Patient: {eintrag[3]} | Kategorie: {eintrag[4]} | Benutzer: {eintrag[5]}"
-            c.drawString(50, y, text)
-            y -= 20
-            if y < 50:
-                c.showPage()
-                y = 750
-    else:
-        cursor.execute("SELECT user_id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen FROM operationen WHERE username = ? ORDER BY user_id", (st.session_state.current_user,))
-        eintraege = cursor.fetchall()
-        for eintrag in eintraege:
-            text = f"ID: {eintrag[0]} | Datum: {eintrag[1]} | Eingriff: {eintrag[2]} | Rolle: {eintrag[3]} | Patient: {eintrag[4]} | Diagnose: {eintrag[5]} | Kategorie: {eintrag[6]}"
-            if eintrag[7]:
-                text += f" | Zugang: {eintrag[7]}"
-            if eintrag[8]:
-                text += f" | Verschlusssystem: {eintrag[8]}"
-            c.drawString(50, y, text)
-            y -= 20
-            if y < 50:
-                c.showPage()
-                y = 750
-    c.save()
-    buffer.seek(0)
-    st.download_button("PDF herunterladen", buffer, "logbuch.pdf", "application/pdf")
-
-# Zusammenfassung Kategorien
-def zusammenfassung_kategorien():
-    if st.session_state.is_tutor:
-        cursor.execute("SELECT kategorie, COUNT(*) FROM operationen GROUP BY kategorie")
-    else:
-        cursor.execute("SELECT kategorie, COUNT(*) FROM operationen WHERE username = ? GROUP BY kategorie", (st.session_state.current_user,))
-    ergebnisse = cursor.fetchall()
-    for kategorie, anzahl in ergebnisse:
-        st.write(f"{kategorie}: {anzahl} Eingriffe")
-
-# Print table (for tutor)
-def print_table():
-    st.markdown('<button onclick="window.print()">Drucken</button>', unsafe_allow_html=True)
-
-# App
-st.title("OP Katalog - Hubertus")
-st.caption("Copyright Victor Ahumada Jimenez 2025")
-
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.current_user = None
-    st.session_state.is_tutor = False
-
-if not st.session_state.logged_in:
-    tab1, tab2, tab3 = st.tabs(["Anmelden", "Registrieren", "Tutor Modus"])
-
-    with tab1:
-        username = st.text_input("Benutzername", key="login_username")
-        password = st.text_input("Passwort", type="password", key="login_password")
-        if st.button("Anmelden"):
-            if username and password:
-                cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
-                user = cursor.fetchone()
-                if user:
-                    st.session_state.logged_in = True
-                    st.session_state.current_user = username
-                    st.session_state.is_tutor = bool(user[3])  # is_tutor from DB
-                    st.success("Anmeldung erfolgreich.")
-                    st.rerun()
-                else:
-                    st.error("Ungültiger Benutzername oder Passwort.")
-            else:
-                st.error("Benutzername und Passwort sind erforderlich.")
-
-    with tab2:
-        reg_type = st.selectbox("Registrieren als", ["Benutzer", "Tutor"])
-        reg_username = st.text_input("Benutzername", key="reg_username")
-        reg_password = st.text_input("Passwort", type="password", key="reg_password")
-        if reg_type == "Tutor":
-            tutor_reg_password = st.text_input("Tutor-Passwort", type="password", key="tutor_reg_password")
-        else:
-            tutor_reg_password = None
-        if st.button("Registrieren"):
-            if reg_username and reg_password:
-                if reg_type == "Tutor" and tutor_reg_password != "tutor01":
-                    st.error("Ungültiges Tutor-Passwort.")
-                else:
-                    is_tutor_reg = 1 if reg_type == "Tutor" else 0
-                    try:
-                        cursor.execute("INSERT INTO users (username, password, is_tutor) VALUES (?, ?, ?)", (reg_username, reg_password, is_tutor_reg))
-                        conn.commit()
-                        st.success("Benutzer erfolgreich registriert.")
-                    except sqlite3.IntegrityError:
-                        st.error("Benutzername existiert bereits.")
-            else:
-                st.error("Benutzername und Passwort sind erforderlich.")
-
-    with tab3:
-        tutor_username = st.text_input("Benutzername", key="tutor_username")
-        tutor_password = st.text_input("Passwort", type="password", key="tutor_password")
-        if st.button("Anmelden als Tutor"):
-            if tutor_password == "tutor01":
-                st.session_state.logged_in = True
-                st.session_state.current_user = tutor_username
-                st.session_state.is_tutor = True
-                st.success("Tutor-Modus aktiviert.")
-                st.rerun()
-            else:
-                st.error("Ungültiges Passwort für Tutor-Modus.")
-else:
-    if st.button("Abmelden"):
-        st.session_state.logged_in = False
-        st.session_state.current_user = None
-        st.session_state.is_tutor = False
-        st.rerun()
-
-    if not st.session_state.is_tutor:
-        st.subheader("Neue Operation hinzufügen")
-        with st.form(key="add_form"):
-            datum = st.text_input("Datum (TT.MM.JJJJ)")
-            kategorie = st.selectbox("Kategorie", ["Operation", "Intervention", "Prozedur"])
-            eingriff_options = {
-                "Operation": [
-                    "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
-                    "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
-                    "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
-                    "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel"
-                ],
-                "Intervention": [
-                    "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
-                    "Thrombektomie over the wire"
-                ],
-                "Prozedur": [
-                    "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
-                    "Punktion/PE"
-                ]
-            }
-            eingriff = st.selectbox("Eingriff", eingriff_options[kategorie])
-            if kategorie == "Intervention":
-                zugang = st.selectbox("Zugang", ["Punktion", "Offen"])
-                if zugang == "Punktion":
-                    verschlusssystem = st.selectbox("Verschlusssystem", ["AngioSeal", "ProGlide"])
-                else:
-                    verschlusssystem = ""
-            else:
-                zugang = ""
-                verschlusssystem = ""
-            rolle = st.selectbox("Rolle", ["Operateur", "Assistent"])
-            patient_id = st.text_input("Patienten-ID")
-            diagnose = st.text_input("Diagnose")
-            notizen = st.text_input("Notizen")
-            submitted = st.form_submit_button("Hinzufügen")
-            if submitted:
-                if validar_fecha(datum):
-                    datum_sort = datetime.strptime(datum, '%d.%m.%Y').strftime('%Y-%m-%d')
-                    # Calcular user_id
-                    cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
-                    max_id = cursor.fetchone()[0]
-                    user_id = (max_id or 0) + 1
-                    cursor.execute('''
-                        INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id))
-                    conn.commit()
-                    st.success("Operation erfolgreich registriert.")
-                else:
-                    st.error("Ungültiges Datumsformat. Bitte verwenden Sie TT.MM.JJJJ.")
-
-    # Búsqueda
-    st.subheader("Einträge suchen")
-    if st.session_state.is_tutor:
-        suche_kriterium = st.selectbox("Suchen nach", ["Kategorie", "Datum", "Datum Range", "Benutzer"])
-        if suche_kriterium in ["Kategorie", "Datum"]:
-            wert = st.text_input("Wert", key="suche_wert")
-        elif suche_kriterium == "Datum Range":
-            vom = st.text_input("vom (TT.MM.JJJJ)", key="vom")
-            bis = st.text_input("bis (TT.MM.JJJJ)", key="bis")
-            wert = None
-        elif suche_kriterium == "Benutzer":
-            cursor.execute("SELECT username FROM users")
-            users = [row[0] for row in cursor.fetchall()]
-            wert = st.selectbox("Benutzer", users)
-        else:
-            wert = None
-    else:
-        suche_kriterium = st.selectbox("Suchen nach", ["Kategorie", "Datum"])
-        wert = st.text_input("Wert", key="suche_wert_user")
-    if st.button("Suchen"):
-        suche_eintraege(suche_kriterium, wert, vom if 'vom' in locals() else None, bis if 'bis' in locals() else None)
-    if st.button("Alle Einträge anzeigen"):
-        zeige_eintraege()
-
-    # Table
-    zeige_eintraege()  # Initial
-
-    # Botones
-    if not st.session_state.is_tutor:
-        st.subheader("Eintrag löschen")
-        loesche_eintrag()
-    if st.button("CSV exportieren"):
-        exportieren_csv()
-    if st.button("PDF exportieren"):
-        exportieren_pdf()
-    if not st.session_state.is_tutor:
-        if st.button("Zusammenfassung Kategorien"):
-            zusammenfassung_kategorien()
-    else:
-        if st.button("Drucken"):
-            print_table()
+        cursor.execute("SELECT user_id, datum, eingriff
 
 st.caption("Copyright Victor Ahumada Jimenez 2025")
 conn.close()
