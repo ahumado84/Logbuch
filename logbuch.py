@@ -27,6 +27,13 @@ def iniciar_base_datos():
         )
     ''')
     
+    # Verificar si la columna is_tutor existe y agregarla si no
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [info[1] for info in cursor.fetchall()]
+    if 'is_tutor' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_tutor INTEGER DEFAULT 0")
+        conn.commit()
+    
     # Crear tabla de operationen si no existe
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS operationen (
@@ -110,8 +117,11 @@ def zeige_eintraege():
         for eintrag in eintraege:
             rolle_display = eintrag[2] if eintrag[2] == "Operateur" else ""
             data.append([eintrag[0], eintrag[1], rolle_display, eintrag[3], eintrag[4], eintrag[5]])
-        df = pd.DataFrame(data, columns=["Datum", "Eingriff", "Rolle", "Patient", "Kategorie", "Benutzer"])
-        st.dataframe(df, use_container_width=True)
+        if data:
+            df = pd.DataFrame(data, columns=["Datum", "Eingriff", "Rolle", "Patient", "Kategorie", "Benutzer"])
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.write("Keine Einträge vorhanden.")
     else:
         cursor.execute("SELECT user_id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen FROM operationen WHERE username = ? ORDER BY user_id", (st.session_state.current_user,))
         eintraege = cursor.fetchall()
@@ -149,7 +159,7 @@ def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
         for eintrag in eintraege:
             rolle_display = eintrag[2] if eintrag[2] == "Operateur" else ""
             data.append([eintrag[0], eintrag[1], rolle_display, eintrag[3], eintrag[4], eintrag[5]])
-        if eintraege:
+        if data:
             df = pd.DataFrame(data, columns=["Datum", "Eingriff", "Rolle", "Patient", "Kategorie", "Benutzer"])
             st.dataframe(df, use_container_width=True)
         else:
@@ -176,7 +186,7 @@ def loesche_eintrag():
     entries = cursor.fetchall()
     if entries:
         entry_options = [f"ID {row[0]} - Datum {row[1]}" for row in entries]
-        selected_entry = st.selectbox("Eintrag zum Löschen auswählen", entry_options)
+        selected_entry = st.selectbox("Eintrag zum Löschen auswählen", entry_options, key="delete_entry")
         if selected_entry and st.button("Löschen bestätigen"):
             user_id = int(selected_entry.split()[1])
             cursor.execute("DELETE FROM operationen WHERE user_id = ? AND username = ?", (user_id, st.session_state.current_user))
@@ -214,7 +224,6 @@ def exportieren_pdf():
     if not PDF_AVAILABLE:
         st.error("PDF-Export nicht verfügbar. Bitte installieren Sie reportlab.")
         return
-        
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     c.setFont("Helvetica", 12)
@@ -274,8 +283,9 @@ if 'logged_in' not in st.session_state:
 
 if not st.session_state.logged_in:
     tab1, tab2, tab3 = st.tabs(["Anmelden", "Registrieren", "Tutor Modus"])
-
+    
     with tab1:
+        st.caption("Copyright Victor Ahumada Jimenez 2025")
         username = st.text_input("Benutzername", key="login_username")
         password = st.text_input("Passwort", type="password", key="login_password")
         if st.button("Anmelden"):
@@ -294,6 +304,7 @@ if not st.session_state.logged_in:
                 st.error("Benutzername und Passwort sind erforderlich.")
 
     with tab2:
+        st.caption("Copyright Victor Ahumada Jimenez 2025")
         reg_type = st.selectbox("Registrieren als", ["Benutzer", "Tutor"])
         reg_username = st.text_input("Benutzername", key="reg_username")
         reg_password = st.text_input("Passwort", type="password", key="reg_password")
@@ -304,7 +315,7 @@ if not st.session_state.logged_in:
         if st.button("Registrieren"):
             if reg_username and reg_password:
                 if reg_type == "Tutor" and tutor_reg_password != "tutor01":
-                    st.error("Ungültiges Tutor-Passwort.")
+                    st.error("Ungültiges Tutor-Passwort. Verwenden Sie 'tutor01'.")
                 else:
                     is_tutor_reg = 1 if reg_type == "Tutor" else 0
                     try:
@@ -317,6 +328,7 @@ if not st.session_state.logged_in:
                 st.error("Benutzername und Passwort sind erforderlich.")
 
     with tab3:
+        st.caption("Copyright Victor Ahumada Jimenez 2025")
         tutor_username = st.text_input("Benutzername", key="tutor_username")
         tutor_password = st.text_input("Passwort", type="password", key="tutor_password")
         if st.button("Anmelden als Tutor"):
@@ -372,6 +384,72 @@ else:
             notizen = st.text_input("Notizen")
             submitted = st.form_submit_button("Hinzufügen")
             if submitted:
-                if validar_fecha(datum):
+                if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
+                    st.error("Alle Pflichtfelder müssen ausgefüllt sein.")
+                elif not validar_fecha(datum):
+                    st.error("Ungültiges Datumsformat. Bitte verwenden Sie TT.MM.JJJJ.")
+                elif kategorie == "Intervention" and not zugang:
+                    st.error("Zugang muss für Intervention ausgewählt sein.")
+                elif kategorie == "Intervention" and zugang == "Punktion" and not verschlusssystem:
+                    st.error("Verschlusssystem muss für Punktion ausgewählt sein.")
+                else:
                     datum_sort = datetime.strptime(datum, '%d.%m.%Y').strftime('%Y-%m-%d')
-                    # Calcular
+                    cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
+                    max_id = cursor.fetchone()[0]
+                    user_id = (max_id or 0) + 1
+                    try:
+                        cursor.execute('''
+                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id))
+                        conn.commit()
+                        st.success("Operation erfolgreich registriert.")
+                        zeige_eintraege()  # Refresh table
+                    except sqlite3.Error as e:
+                        st.error(f"Fehler beim Hinzufügen: {e}")
+
+    # Búsqueda
+    st.subheader("Einträge suchen")
+    if st.session_state.is_tutor:
+        suche_kriterium = st.selectbox("Suchen nach", ["Kategorie", "Datum", "Datum Range", "Benutzer"], key="suche_kriterium")
+        if suche_kriterium in ["Kategorie", "Datum"]:
+            wert = st.text_input("Wert", key="suche_wert")
+        elif suche_kriterium == "Datum Range":
+            vom = st.text_input("vom (TT.MM.JJJJ)", key="vom")
+            bis = st.text_input("bis (TT.MM.JJJJ)", key="bis")
+            wert = None
+        elif suche_kriterium == "Benutzer":
+            cursor.execute("SELECT username FROM users")
+            users = [row[0] for row in cursor.fetchall()]
+            wert = st.selectbox("Benutzer", users, key="benutzer_select")
+        else:
+            wert = None
+    else:
+        suche_kriterium = st.selectbox("Suchen nach", ["Kategorie", "Datum"], key="suche_kriterium_user")
+        wert = st.text_input("Wert", key="suche_wert_user")
+    if st.button("Suchen"):
+        suche_eintraege(suche_kriterium, wert, vom if 'vom' in locals() else None, bis if 'bis' in locals() else None)
+    if st.button("Alle Einträge anzeigen"):
+        zeige_eintraege()
+
+    # Table
+    st.subheader("Einträge")
+    zeige_eintraege()  # Always show table
+
+    # Botones
+    if not st.session_state.is_tutor:
+        st.subheader("Eintrag löschen")
+        loesche_eintrag()
+    if st.button("CSV exportieren"):
+        exportieren_csv()
+    if st.button("PDF exportieren"):
+        exportieren_pdf()
+    if not st.session_state.is_tutor:
+        if st.button("Zusammenfassung Kategorien"):
+            zusammenfassung_kategorien()
+    else:
+        if st.button("Drucken"):
+            print_table()
+
+st.caption("Copyright Victor Ahumada Jimenez 2025")
+conn.close()
