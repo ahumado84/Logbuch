@@ -28,7 +28,7 @@ def iniciar_base_datos():
         )
     ''')
     
-    # Verificar si la columna is_tutor existe y agregarla si no
+    # Verificar si la columna is_tutor y is_master existen y agregarlas si no
     cursor.execute("PRAGMA table_info(users)")
     columns = [info[1] for info in cursor.fetchall()]
     if 'is_tutor' not in columns:
@@ -37,10 +37,21 @@ def iniciar_base_datos():
         cursor.execute("ALTER TABLE users ADD COLUMN is_master INTEGER DEFAULT 0")
     
     # Inicializar usuario maestro si no existe
-    cursor.execute("SELECT username FROM users WHERE username = ?", ("ahuvic",))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO users (username, password, is_master) VALUES (?, ?, ?)", ("ahuvic", "rJimenez.1", 1))
-        conn.commit()
+    cursor.execute("SELECT username, password, is_master FROM users WHERE username = ?", ("ahuvic",))
+    user = cursor.fetchone()
+    if not user:
+        try:
+            cursor.execute("INSERT INTO users (username, password, is_master, is_tutor) VALUES (?, ?, ?, ?)", ("ahuvic", "rJimenez.1", 1, 0))
+            conn.commit()
+            st.write("Master user 'ahuvic' created successfully.")
+        except sqlite3.Error as e:
+            st.error(f"Error creating master user: {e}")
+    else:
+        # Actualizar si el usuario existe pero no es maestro o tiene contraseña diferente
+        if user[1] != "rJimenez.1" or user[2] != 1:
+            cursor.execute("UPDATE users SET password = ?, is_master = ? WHERE username = ?", ("rJimenez.1", 1, "ahuvic"))
+            conn.commit()
+            st.write("Master user 'ahuvic' updated successfully.")
     
     # Crear tabla de operationen si no existe
     cursor.execute('''
@@ -413,10 +424,17 @@ if not st.session_state.logged_in:
                     st.session_state.current_user = username
                     st.session_state.is_tutor = bool(user[3])
                     st.session_state.is_master = bool(user[4])
-                    st.success("Anmeldung erfolgreich.")
+                    st.success(f"Anmeldung erfolgreich als {'Master' if user[4] else 'Tutor' if user[3] else 'Benutzer'}.")
                     st.rerun()
                 else:
                     st.error("Ungültiger Benutzername oder Passwort.")
+                    # Debug: Check if master user exists
+                    cursor.execute("SELECT username, password, is_master FROM users WHERE username = ?", ("ahuvic",))
+                    master_user = cursor.fetchone()
+                    if master_user:
+                        st.write(f"Debug: Master user exists with username: {master_user[0]}, is_master: {master_user[2]}")
+                    else:
+                        st.write("Debug: Master user 'ahuvic' not found in database.")
             else:
                 st.error("Benutzername und Passwort sind erforderlich.")
 
