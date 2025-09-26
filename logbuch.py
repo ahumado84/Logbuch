@@ -23,7 +23,8 @@ def iniciar_base_datos():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,
             password TEXT,
-            is_tutor INTEGER DEFAULT 0
+            is_tutor INTEGER DEFAULT 0,
+            is_master INTEGER DEFAULT 0
         )
     ''')
     
@@ -32,6 +33,13 @@ def iniciar_base_datos():
     columns = [info[1] for info in cursor.fetchall()]
     if 'is_tutor' not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN is_tutor INTEGER DEFAULT 0")
+    if 'is_master' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN is_master INTEGER DEFAULT 0")
+    
+    # Inicializar usuario maestro si no existe
+    cursor.execute("SELECT username FROM users WHERE username = ?", ("ahuvic",))
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (username, password, is_master) VALUES (?, ?, ?)", ("ahuvic", "rJimenez.1", 1))
         conn.commit()
     
     # Crear tabla de operationen si no existe
@@ -64,7 +72,6 @@ def iniciar_base_datos():
         cursor.execute("ALTER TABLE operationen ADD COLUMN username TEXT")
     if 'user_id' not in columns:
         cursor.execute("ALTER TABLE operationen ADD COLUMN user_id INTEGER")
-        # Asignar user_id secuencial por usuario para registros existentes
         cursor.execute("SELECT DISTINCT username FROM operationen WHERE username IS NOT NULL")
         for row in cursor.fetchall():
             user = row[0]
@@ -75,7 +82,6 @@ def iniciar_base_datos():
         conn.commit()
     if 'datum_sort' not in columns:
         cursor.execute("ALTER TABLE operationen ADD COLUMN datum_sort TEXT")
-        # Llenar datum_sort para registros existentes
         cursor.execute("SELECT id, datum FROM operationen")
         for row in cursor.fetchall():
             id, datum = row
@@ -84,7 +90,7 @@ def iniciar_base_datos():
                     datum_sort = datetime.strptime(datum, '%d.%m.%Y').strftime('%Y-%m-%d')
                     cursor.execute("UPDATE operationen SET datum_sort = ? WHERE id = ?", (datum_sort, id))
                 except ValueError:
-                    pass  # Fecha inválida, saltar
+                    pass
         conn.commit()
     
     conn.commit()
@@ -108,9 +114,17 @@ def reorganizar_user_ids(current_user):
         cursor.execute("UPDATE operationen SET user_id = ? WHERE user_id = ? AND username = ?", (new_id, old_id, current_user))
     conn.commit()
 
-# Mostrar todos los registros (filtrados por usuario o todos para tutor)
+# Mostrar todos los registros (filtrados por usuario o todos para tutor/master)
 def zeige_eintraege():
-    if st.session_state.is_tutor:
+    if st.session_state.is_master:
+        cursor.execute("SELECT id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id FROM operationen ORDER BY datum_sort DESC")
+        eintraege = cursor.fetchall()
+        if eintraege:
+            df = pd.DataFrame(eintraege, columns=["DB ID", "Datum", "Eingriff", "Rolle", "Patient", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen", "Benutzer", "User ID"])
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.write("Keine Einträge vorhanden.")
+    elif st.session_state.is_tutor:
         cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen ORDER BY datum_sort DESC")
         eintraege = cursor.fetchall()
         data = []
@@ -133,7 +147,7 @@ def zeige_eintraege():
 
 # Buscar registros
 def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
-    if st.session_state.is_tutor:
+    if st.session_state.is_master or st.session_state.is_tutor:
         if suche_kriterium == "Datum Range":
             if not vom or not bis or not validar_fecha(vom) or not validar_fecha(bis):
                 st.error("Ungültige Datumsangaben. Bitte verwenden Sie TT.MM.JJJJ.")
@@ -180,7 +194,7 @@ def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
         else:
             st.write("Keine Einträge gefunden.")
 
-# Eliminar Eintrag
+# Eliminar Eintrag (para usuarios regulares)
 def loesche_eintrag():
     cursor.execute("SELECT user_id, datum FROM operationen WHERE username = ? ORDER BY user_id", (st.session_state.current_user,))
     entries = cursor.fetchall()
@@ -197,9 +211,110 @@ def loesche_eintrag():
     else:
         st.write("Keine Einträge vorhanden.")
 
+# Eliminar Eintrag (para master)
+def master_loesche_eintrag():
+    cursor.execute("SELECT id, datum, username FROM operationen ORDER BY id")
+    entries = cursor.fetchall()
+    if entries:
+        entry_options = [f"DB ID {row[0]} - Datum {row[1]} - Benutzer {row[2]}" for row in entries]
+        selected_entry = st.selectbox("Eintrag zum Löschen auswählen", entry_options, key="master_delete_entry")
+        if selected_entry and st.button("Eintrag löschen bestätigen"):
+            db_id = int(selected_entry.split()[2])
+            cursor.execute("SELECT username FROM operationen WHERE id = ?", (db_id,))
+            username = cursor.fetchone()[0]
+            cursor.execute("DELETE FROM operationen WHERE id = ?", (db_id,))
+            conn.commit()
+            reorganizar_user_ids(username)
+            st.success("Eintrag gelöscht.")
+            zeige_eintraege()
+    else:
+        st.write("Keine Einträge vorhanden.")
+
+# Editar Eintrag (para master)
+def master_edit_eintrag():
+    cursor.execute("SELECT id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username FROM operationen ORDER BY id")
+    entries = cursor.fetchall()
+    if entries:
+        entry_options = [f"DB ID {row[0]} - Datum {row[1]} - Benutzer {row[10]}" for row in entries]
+        selected_entry = st.selectbox("Eintrag zum Bearbeiten auswählen", entry_options, key="master_edit_entry")
+        if selected_entry:
+            db_id = int(selected_entry.split()[2])
+            cursor.execute("SELECT * FROM operationen WHERE id = ?", (db_id,))
+            entry = cursor.fetchone()
+            with st.form(key="edit_form"):
+                datum = st.text_input("Datum (TT.MM.JJJJ)", value=entry[1])
+                kategorie = st.selectbox("Kategorie", ["Operation", "Intervention", "Prozedur"], index=["Operation", "Intervention", "Prozedur"].index(entry[7]) if entry[7] in ["Operation", "Intervention", "Prozedur"] else 0)
+                eingriff_options = {
+                    "Operation": [
+                        "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
+                        "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
+                        "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
+                        "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel"
+                    ],
+                    "Intervention": [
+                        "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
+                        "Thrombektomie over the wire"
+                    ],
+                    "Prozedur": [
+                        "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
+                        "Punktion/PE"
+                    ]
+                }
+                eingriff = st.selectbox("Eingriff", eingriff_options[kategorie], index=eingriff_options[kategorie].index(entry[3]) if entry[3] in eingriff_options[kategorie] else 0)
+                if kategorie == "Intervention":
+                    zugang = st.selectbox("Zugang", ["Punktion", "Offen"], index=["Punktion", "Offen"].index(entry[8]) if entry[8] in ["Punktion", "Offen"] else 0)
+                    if zugang == "Punktion":
+                        verschlusssystem = st.selectbox("Verschlusssystem", ["AngioSeal", "ProGlide"], index=["AngioSeal", "ProGlide"].index(entry[9]) if entry[9] in ["AngioSeal", "ProGlide"] else 0)
+                    else:
+                        verschlusssystem = ""
+                else:
+                    zugang = ""
+                    verschlusssystem = ""
+                rolle = st.selectbox("Rolle", ["Operateur", "Assistent"], index=["Operateur", "Assistent"].index(entry[4]) if entry[4] in ["Operateur", "Assistent"] else 0)
+                patient_id = st.text_input("Patienten-ID", value=entry[5])
+                diagnose = st.text_input("Diagnose", value=entry[6])
+                notizen = st.text_input("Notizen", value=entry[10] if entry[10] else "")
+                if st.form_submit_button("Änderungen speichern"):
+                    if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
+                        st.error("Alle Pflichtfelder müssen ausgefüllt sein.")
+                    elif not validar_fecha(datum):
+                        st.error("Ungültiges Datumsformat. Bitte verwenden Sie TT.MM.JJJJ.")
+                    elif kategorie == "Intervention" and not zugang:
+                        st.error("Zugang muss für Intervention ausgewählt sein.")
+                    elif kategorie == "Intervention" and zugang == "Punktion" and not verschlusssystem:
+                        st.error("Verschlusssystem muss für Punktion ausgewählt sein.")
+                    else:
+                        datum_sort = datetime.strptime(datum, '%d.%m.%Y').strftime('%Y-%m-%d')
+                        try:
+                            cursor.execute('''
+                                UPDATE operationen SET datum = ?, datum_sort = ?, eingriff = ?, rolle = ?, patient_id = ?, diagnose = ?, kategorie = ?, zugang = ?, verschlusssystem = ?, notizen = ?
+                                WHERE id = ?
+                            ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, db_id))
+                            conn.commit()
+                            st.success("Eintrag erfolgreich bearbeitet.")
+                            zeige_eintraege()
+                        except sqlite3.Error as e:
+                            st.error(f"Fehler beim Bearbeiten: {e}")
+    else:
+        st.write("Keine Einträge vorhanden.")
+
+# Eliminar usuario (para master)
+def master_loesche_benutzer():
+    cursor.execute("SELECT username FROM users WHERE username != ? AND is_master = 0", (st.session_state.current_user,))
+    users = [row[0] for row in cursor.fetchall()]
+    if users:
+        selected_user = st.selectbox("Benutzer zum Löschen auswählen", users, key="master_delete_user")
+        if selected_user and st.button("Benutzer löschen bestätigen"):
+            cursor.execute("DELETE FROM operationen WHERE username = ?", (selected_user,))
+            cursor.execute("DELETE FROM users WHERE username = ?", (selected_user,))
+            conn.commit()
+            st.success(f"Benutzer {selected_user} und alle zugehörigen Einträge gelöscht.")
+    else:
+        st.write("Keine Benutzer vorhanden.")
+
 # Export CSV
 def exportieren_csv():
-    if st.session_state.is_tutor:
+    if st.session_state.is_master or st.session_state.is_tutor:
         cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen ORDER BY datum_sort DESC")
         eintraege = cursor.fetchall()
         output = io.StringIO()
@@ -229,7 +344,7 @@ def exportieren_pdf():
     c.setFont("Helvetica", 12)
     c.drawString(100, 750, "Logbuch - Chirurgischer Bericht")
     y = 700
-    if st.session_state.is_tutor:
+    if st.session_state.is_master or st.session_state.is_tutor:
         cursor.execute("SELECT datum, eingriff, rolle, patient_id, kategorie, username FROM operationen ORDER BY datum_sort DESC")
         eintraege = cursor.fetchall()
         for eintrag in eintraege:
@@ -260,7 +375,7 @@ def exportieren_pdf():
 
 # Zusammenfassung Kategorien
 def zusammenfassung_kategorien():
-    if st.session_state.is_tutor:
+    if st.session_state.is_master or st.session_state.is_tutor:
         cursor.execute("SELECT kategorie, COUNT(*) FROM operationen GROUP BY kategorie")
     else:
         cursor.execute("SELECT kategorie, COUNT(*) FROM operationen WHERE username = ? GROUP BY kategorie", (st.session_state.current_user,))
@@ -268,7 +383,7 @@ def zusammenfassung_kategorien():
     for kategorie, anzahl in ergebnisse:
         st.write(f"{kategorie}: {anzahl} Eingriffe")
 
-# Print table (for tutor)
+# Print table (for tutor and master)
 def print_table():
     st.markdown('<button onclick="window.print()">Drucken</button>', unsafe_allow_html=True)
 
@@ -280,6 +395,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.current_user = None
     st.session_state.is_tutor = False
+    st.session_state.is_master = False
 
 if not st.session_state.logged_in:
     tab1, tab2, tab3 = st.tabs(["Anmelden", "Registrieren", "Tutor Modus"])
@@ -295,7 +411,8 @@ if not st.session_state.logged_in:
                 if user:
                     st.session_state.logged_in = True
                     st.session_state.current_user = username
-                    st.session_state.is_tutor = bool(user[3])  # is_tutor from DB
+                    st.session_state.is_tutor = bool(user[3])
+                    st.session_state.is_master = bool(user[4])
                     st.success("Anmeldung erfolgreich.")
                     st.rerun()
                 else:
@@ -319,7 +436,7 @@ if not st.session_state.logged_in:
                 else:
                     is_tutor_reg = 1 if reg_type == "Tutor" else 0
                     try:
-                        cursor.execute("INSERT INTO users (username, password, is_tutor) VALUES (?, ?, ?)", (reg_username, reg_password, is_tutor_reg))
+                        cursor.execute("INSERT INTO users (username, password, is_tutor, is_master) VALUES (?, ?, ?, 0)", (reg_username, reg_password, is_tutor_reg))
                         conn.commit()
                         st.success("Benutzer erfolgreich registriert.")
                     except sqlite3.IntegrityError:
@@ -336,6 +453,7 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.current_user = tutor_username
                 st.session_state.is_tutor = True
+                st.session_state.is_master = False
                 st.success("Tutor-Modus aktiviert.")
                 st.rerun()
             else:
@@ -345,9 +463,21 @@ else:
         st.session_state.logged_in = False
         st.session_state.current_user = None
         st.session_state.is_tutor = False
+        st.session_state.is_master = False
         st.rerun()
 
-    if not st.session_state.is_tutor:
+    if st.session_state.is_master:
+        st.subheader("Master-Verwaltungspanel")
+        st.caption("Copyright Victor Ahumada Jimenez 2025")
+        st.subheader("Alle Einträge anzeigen")
+        zeige_eintraege()
+        st.subheader("Eintrag bearbeiten")
+        master_edit_eintrag()
+        st.subheader("Eintrag löschen")
+        master_loesche_eintrag()
+        st.subheader("Benutzer löschen")
+        master_loesche_benutzer()
+    elif not st.session_state.is_tutor:
         st.subheader("Neue Operation hinzufügen")
         with st.form(key="add_form"):
             datum = st.text_input("Datum (TT.MM.JJJJ)")
@@ -404,13 +534,13 @@ else:
                         ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id))
                         conn.commit()
                         st.success("Operation erfolgreich registriert.")
-                        zeige_eintraege()  # Refresh table
+                        zeige_eintraege()
                     except sqlite3.Error as e:
                         st.error(f"Fehler beim Hinzufügen: {e}")
 
     # Búsqueda
     st.subheader("Einträge suchen")
-    if st.session_state.is_tutor:
+    if st.session_state.is_master or st.session_state.is_tutor:
         suche_kriterium = st.selectbox("Suchen nach", ["Kategorie", "Datum", "Datum Range", "Benutzer"], key="suche_kriterium")
         if suche_kriterium in ["Kategorie", "Datum"]:
             wert = st.text_input("Wert", key="suche_wert")
@@ -434,20 +564,20 @@ else:
 
     # Table
     st.subheader("Einträge")
-    zeige_eintraege()  # Always show table
+    zeige_eintraege()
 
     # Botones
-    if not st.session_state.is_tutor:
+    if not st.session_state.is_master and not st.session_state.is_tutor:
         st.subheader("Eintrag löschen")
         loesche_eintrag()
     if st.button("CSV exportieren"):
         exportieren_csv()
     if st.button("PDF exportieren"):
         exportieren_pdf()
-    if not st.session_state.is_tutor:
+    if not st.session_state.is_master and not st.session_state.is_tutor:
         if st.button("Zusammenfassung Kategorien"):
             zusammenfassung_kategorien()
-    else:
+    elif st.session_state.is_tutor:
         if st.button("Drucken"):
             print_table()
 
