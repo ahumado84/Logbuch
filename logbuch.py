@@ -4,6 +4,8 @@ import csv
 from datetime import datetime
 import pandas as pd
 import io
+import zipfile
+import os
 try:
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas
@@ -47,7 +49,6 @@ def iniciar_base_datos():
         except sqlite3.Error as e:
             st.error(f"Error creating master user: {e}")
     else:
-        # Actualizar si el usuario existe pero no es maestro o tiene contraseña diferente
         if user[1] != "rJimenez.1" or user[2] != 1:
             cursor.execute("UPDATE users SET password = ?, is_master = ? WHERE username = ?", ("rJimenez.1", 1, "ahuvic"))
             conn.commit()
@@ -323,6 +324,54 @@ def master_loesche_benutzer():
     else:
         st.write("Keine Benutzer vorhanden.")
 
+# Backup Database
+def backup_database():
+    if not os.path.exists("chirurgischer_bericht.db"):
+        st.error("Datenbankdatei nicht gefunden.")
+        return
+    with open("chirurgischer_bericht.db", "rb") as db_file:
+        db_data = db_file.read()
+    st.download_button(
+        label="Datenbank herunterladen (.db)",
+        data=db_data,
+        file_name="chirurgischer_bericht_backup.db",
+        mime="application/octet-stream"
+    )
+
+# Backup Tables as CSV
+def backup_tables_csv():
+    # Export users table
+    cursor.execute("SELECT * FROM users")
+    users_data = cursor.fetchall()
+    users_output = io.StringIO()
+    users_writer = csv.writer(users_output)
+    users_writer.writerow(["id", "username", "password", "is_tutor", "is_master"])
+    users_writer.writerows(users_data)
+    users_csv = users_output.getvalue()
+    
+    # Export operationen table
+    cursor.execute("SELECT * FROM operationen")
+    operationen_data = cursor.fetchall()
+    operationen_output = io.StringIO()
+    operationen_writer = csv.writer(operationen_output)
+    operationen_writer.writerow(["id", "datum", "datum_sort", "eingriff", "rolle", "patient_id", "diagnose", "kategorie", "zugang", "verschlusssystem", "notizen", "username", "user_id"])
+    operationen_writer.writerows(operationen_data)
+    operationen_csv = operationen_output.getvalue()
+    
+    # Create ZIP file
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        zip_file.writestr("users.csv", users_csv)
+        zip_file.writestr("operationen.csv", operationen_csv)
+    zip_buffer.seek(0)
+    
+    st.download_button(
+        label="Tabellen als CSV herunterladen (ZIP)",
+        data=zip_buffer,
+        file_name="logbuch_backup.zip",
+        mime="application/zip"
+    )
+
 # Export CSV
 def exportieren_csv():
     if st.session_state.is_master or st.session_state.is_tutor:
@@ -428,7 +477,6 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("Ungültiger Benutzername oder Passwort.")
-                    # Debug: Check if master user exists
                     cursor.execute("SELECT username, password, is_master FROM users WHERE username = ?", ("ahuvic",))
                     master_user = cursor.fetchone()
                     if master_user:
@@ -495,6 +543,9 @@ else:
         master_loesche_eintrag()
         st.subheader("Benutzer löschen")
         master_loesche_benutzer()
+        st.subheader("Datenbank sichern")
+        backup_database()
+        backup_tables_csv()
     elif not st.session_state.is_tutor:
         st.subheader("Neue Operation hinzufügen")
         with st.form(key="add_form"):
