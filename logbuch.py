@@ -157,6 +157,45 @@ def zeige_eintraege():
         else:
             st.write("Keine Einträge vorhanden.")
 
+# Mostrar Logbuch (para usuarios regulares)
+def zeige_logbuch():
+    st.subheader("Logbuch zum Facharzt für Gefäßchirurgie")
+    cursor.execute("SELECT user_id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen FROM operationen WHERE username = ? ORDER BY datum_sort DESC", (st.session_state.current_user,))
+    eintraege = cursor.fetchall()
+    if eintraege:
+        df = pd.DataFrame(eintraege, columns=["ID", "Datum", "Eingriff", "Rolle", "Patienten-ID", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
+        st.dataframe(df, use_container_width=True)
+        # Export options
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Datum", "Eingriff", "Rolle", "Patienten-ID", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
+        writer.writerows(eintraege)
+        csv_data = output.getvalue()
+        st.download_button("Logbuch als CSV herunterladen", csv_data, f"logbuch_{st.session_state.current_user}.csv", "text/csv")
+        
+        if PDF_AVAILABLE:
+            buffer = io.BytesIO()
+            c = canvas.Canvas(buffer, pagesize=letter)
+            c.setFont("Helvetica", 12)
+            c.drawString(100, 750, f"Logbuch - {st.session_state.current_user}")
+            y = 700
+            for eintrag in eintraege:
+                text = f"ID: {eintrag[0]} | Datum: {eintrag[1]} | Eingriff: {eintrag[2]} | Rolle: {eintrag[3]} | Patient: {eintrag[4]} | Diagnose: {eintrag[5]} | Kategorie: {eintrag[6]}"
+                if eintrag[7]:
+                    text += f" | Zugang: {eintrag[7]}"
+                if eintrag[8]:
+                    text += f" | Verschlusssystem: {eintrag[8]}"
+                c.drawString(50, y, text)
+                y -= 20
+                if y < 50:
+                    c.showPage()
+                    y = 750
+            c.save()
+            buffer.seek(0)
+            st.download_button("Logbuch als PDF herunterladen", buffer, f"logbuch_{st.session_state.current_user}.pdf", "application/pdf")
+    else:
+        st.write("Keine Einträge im Logbuch vorhanden.")
+
 # Buscar registros
 def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
     if st.session_state.is_master or st.session_state.is_tutor:
@@ -340,7 +379,6 @@ def backup_database():
 
 # Backup Tables as CSV
 def backup_tables_csv():
-    # Export users table
     cursor.execute("SELECT * FROM users")
     users_data = cursor.fetchall()
     users_output = io.StringIO()
@@ -349,7 +387,6 @@ def backup_tables_csv():
     users_writer.writerows(users_data)
     users_csv = users_output.getvalue()
     
-    # Export operationen table
     cursor.execute("SELECT * FROM operationen")
     operationen_data = cursor.fetchall()
     operationen_output = io.StringIO()
@@ -358,7 +395,6 @@ def backup_tables_csv():
     operationen_writer.writerows(operationen_data)
     operationen_csv = operationen_output.getvalue()
     
-    # Create ZIP file
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         zip_file.writestr("users.csv", users_csv)
@@ -606,6 +642,10 @@ else:
                         zeige_eintraege()
                     except sqlite3.Error as e:
                         st.error(f"Fehler beim Hinzufügen: {e}")
+        
+        # Logbuch Button
+        if st.button("Logbuch anzeigen"):
+            zeige_logbuch()
 
     # Búsqueda
     st.subheader("Einträge suchen")
