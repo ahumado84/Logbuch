@@ -69,7 +69,8 @@ def iniciar_base_datos():
             verschlusssystem TEXT,
             notizen TEXT,
             username TEXT,
-            user_id INTEGER
+            user_id INTEGER,
+            skills_acquired INTEGER DEFAULT 0  -- New field for Kenntnisse, Erfahrungen und Fertigkeiten
         )
     ''')
     
@@ -103,6 +104,9 @@ def iniciar_base_datos():
                     cursor.execute("UPDATE operationen SET datum_sort = ? WHERE id = ?", (datum_sort, id))
                 except ValueError:
                     pass
+        conn.commit()
+    if 'skills_acquired' not in columns:
+        cursor.execute("ALTER TABLE operationen ADD COLUMN skills_acquired INTEGER DEFAULT 0")
         conn.commit()
     
     conn.commit()
@@ -157,44 +161,69 @@ def zeige_eintraege():
         else:
             st.write("Keine Einträge vorhanden.")
 
-# Mostrar Logbuch (para usuarios regulares)
+# Mostrar Logbuch (para usuarios regulares) mit Ärztekammer-Struktur
 def zeige_logbuch():
     st.subheader("Logbuch zum Facharzt für Gefäßchirurgie")
-    cursor.execute("SELECT user_id, datum, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen FROM operationen WHERE username = ? ORDER BY datum_sort DESC", (st.session_state.current_user,))
-    eintraege = cursor.fetchall()
-    if eintraege:
-        df = pd.DataFrame(eintraege, columns=["ID", "Datum", "Eingriff", "Rolle", "Patienten-ID", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
-        st.dataframe(df, use_container_width=True)
-        # Export options
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["ID", "Datum", "Eingriff", "Rolle", "Patienten-ID", "Diagnose", "Kategorie", "Zugang", "Verschlusssystem", "Notizen"])
-        writer.writerows(eintraege)
-        csv_data = output.getvalue()
-        st.download_button("Logbuch als CSV herunterladen", csv_data, f"logbuch_{st.session_state.current_user}.csv", "text/csv")
-        
-        if PDF_AVAILABLE:
-            buffer = io.BytesIO()
-            c = canvas.Canvas(buffer, pagesize=letter)
-            c.setFont("Helvetica", 12)
-            c.drawString(100, 750, f"Logbuch - {st.session_state.current_user}")
-            y = 700
-            for eintrag in eintraege:
-                text = f"ID: {eintrag[0]} | Datum: {eintrag[1]} | Eingriff: {eintrag[2]} | Rolle: {eintrag[3]} | Patient: {eintrag[4]} | Diagnose: {eintrag[5]} | Kategorie: {eintrag[6]}"
-                if eintrag[7]:
-                    text += f" | Zugang: {eintrag[7]}"
-                if eintrag[8]:
-                    text += f" | Verschlusssystem: {eintrag[8]}"
-                c.drawString(50, y, text)
-                y -= 20
-                if y < 50:
-                    c.showPage()
-                    y = 750
-            c.save()
-            buffer.seek(0)
-            st.download_button("Logbuch als PDF herunterladen", buffer, f"logbuch_{st.session_state.current_user}.pdf", "application/pdf")
-    else:
-        st.write("Keine Einträge im Logbuch vorhanden.")
+    st.write(f"Name, Vorname: {st.session_state.current_user} | Stand: {datetime.now().strftime('%d.%m.%Y')}")
+    st.write("WbO der ÄKB 2004, 1. bis 8. Nachtrag")
+
+    # Gefäßchirurgie-spezifische Kategorien und Richtzahlen (Pages 12-15)
+    gefaesschirurgie_procedures = {
+        "intraoperative angiographische Untersuchungen": 50,
+        "Doppler-/Duplex-Untersuchungen (Extremitäten)": 300,
+        "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)": 100,
+        "Doppler-/Duplex-Untersuchungen (extrakraniell)": 100,
+        "hämodynamische Untersuchungen an Venen": 50,
+        "rekonstruktive Operationen (supraaortale Arterien)": 25,
+        "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)": 50,
+        "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)": 50,
+        "endovaskuläre Eingriffe": 25,
+        "Anlage von Dialyse-Shunts/Port-Implantation": 25,
+        "Operationen am Venensystem": 50,
+        "Grenzzonenamputationen/Ulkusversorgungen": 25
+    }
+
+    logbuch_data = []
+    for eingriff, richtzahl in gefaesschirurgie_procedures.items():
+        cursor.execute("""
+            SELECT COUNT(*), GROUP_CONCAT(datum || ' (' || (CASE WHEN skills_acquired = 1 THEN 'Ja' ELSE 'Nein' END) || ')') 
+            FROM operationen 
+            WHERE username = ? AND eingriff = ? AND kategorie = 'Operation' OR kategorie = 'Intervention' OR kategorie = 'Prozedur'
+        """, (st.session_state.current_user, eingriff))
+        count_result = cursor.fetchone()
+        count = count_result[0] if count_result[0] else 0
+        dates_skills = count_result[1] if count_result[1] else ""
+        logbuch_data.append([eingriff, richtzahl, dates_skills, "Ja" if count >= richtzahl else "Nein", "Unterschrift/Stempel erforderlich"])
+
+    df = pd.DataFrame(logbuch_data, columns=["Eingriff", "Richtzahl", "Anzahl/Datum (Kenntnisse erworben)", "Kenntnisse erworben", "Unterschrift/Stempel"])
+    st.dataframe(df, use_container_width=True)
+
+    # Export options
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Eingriff", "Richtzahl", "Anzahl/Datum (Kenntnisse erworben)", "Kenntnisse erworben", "Unterschrift/Stempel"])
+    writer.writerows(logbuch_data)
+    csv_data = output.getvalue()
+    st.download_button("Logbuch als CSV herunterladen", csv_data, f"logbuch_{st.session_state.current_user}.csv", "text/csv")
+    
+    if PDF_AVAILABLE:
+        buffer = io.BytesIO()
+        c = canvas.Canvas(buffer, pagesize=letter)
+        c.setFont("Helvetica", 12)
+        c.drawString(100, 750, f"Logbuch - {st.session_state.current_user}")
+        c.drawString(100, 730, f"Stand: {datetime.now().strftime('%d.%m.%Y')}")
+        c.drawString(100, 710, "WbO der ÄKB 2004, 1. bis 8. Nachtrag")
+        y = 690
+        for row in logbuch_data:
+            text = f"Eingriff: {row[0]} | Richtzahl: {row[1]} | Anzahl/Datum: {row[2]} | Kenntnisse: {row[3]} | Unterschrift: {row[4]}"
+            c.drawString(50, y, text)
+            y -= 20
+            if y < 50:
+                c.showPage()
+                y = 750
+        c.save()
+        buffer.seek(0)
+        st.download_button("Logbuch als PDF herunterladen", buffer, f"logbuch_{st.session_state.current_user}.pdf", "application/pdf")
 
 # Buscar registros
 def suche_eintraege(suche_kriterium, wert, vom=None, bis=None):
@@ -300,15 +329,20 @@ def master_edit_eintrag():
                         "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
                         "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
                         "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
-                        "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel"
+                        "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel",
+                        "rekonstruktive Operationen (supraaortale Arterien)", "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                        "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)", "Operationen am Venensystem",
+                        "Grenzzonenamputationen/Ulkusversorgungen"
                     ],
                     "Intervention": [
                         "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
-                        "Thrombektomie over the wire"
+                        "Thrombektomie over the wire", "endovaskuläre Eingriffe", "Anlage von Dialyse-Shunts/Port-Implantation"
                     ],
                     "Prozedur": [
                         "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
-                        "Punktion/PE"
+                        "Punktion/PE", "intraoperative angiographische Untersuchungen", "hämodynamische Untersuchungen an Venen",
+                        "Doppler-/Duplex-Untersuchungen (Extremitäten)", "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
+                        "Doppler-/Duplex-Untersuchungen (extrakraniell)"
                     ]
                 }
                 eingriff = st.selectbox("Eingriff", eingriff_options[kategorie], index=eingriff_options[kategorie].index(entry[3]) if entry[3] in eingriff_options[kategorie] else 0)
@@ -325,6 +359,7 @@ def master_edit_eintrag():
                 patient_id = st.text_input("Patienten-ID", value=entry[5])
                 diagnose = st.text_input("Diagnose", value=entry[6])
                 notizen = st.text_input("Notizen", value=entry[10] if entry[10] else "")
+                skills_acquired = st.checkbox("Kenntnisse, Erfahrungen und Fertigkeiten erworben", value=bool(entry[12]))
                 if st.form_submit_button("Änderungen speichern"):
                     if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
                         st.error("Alle Pflichtfelder müssen ausgefüllt sein.")
@@ -338,9 +373,9 @@ def master_edit_eintrag():
                         datum_sort = datetime.strptime(datum, '%d.%m.%Y').strftime('%Y-%m-%d')
                         try:
                             cursor.execute('''
-                                UPDATE operationen SET datum = ?, datum_sort = ?, eingriff = ?, rolle = ?, patient_id = ?, diagnose = ?, kategorie = ?, zugang = ?, verschlusssystem = ?, notizen = ?
+                                UPDATE operationen SET datum = ?, datum_sort = ?, eingriff = ?, rolle = ?, patient_id = ?, diagnose = ?, kategorie = ?, zugang = ?, verschlusssystem = ?, notizen = ?, skills_acquired = ?
                                 WHERE id = ?
-                            ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, db_id))
+                            ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, 1 if skills_acquired else 0, db_id))
                             conn.commit()
                             st.success("Eintrag erfolgreich bearbeitet.")
                             zeige_eintraege()
@@ -391,7 +426,7 @@ def backup_tables_csv():
     operationen_data = cursor.fetchall()
     operationen_output = io.StringIO()
     operationen_writer = csv.writer(operationen_output)
-    operationen_writer.writerow(["id", "datum", "datum_sort", "eingriff", "rolle", "patient_id", "diagnose", "kategorie", "zugang", "verschlusssystem", "notizen", "username", "user_id"])
+    operationen_writer.writerow(["id", "datum", "datum_sort", "eingriff", "rolle", "patient_id", "diagnose", "kategorie", "zugang", "verschlusssystem", "notizen", "username", "user_id", "skills_acquired"])
     operationen_writer.writerows(operationen_data)
     operationen_csv = operationen_output.getvalue()
     
@@ -592,15 +627,20 @@ else:
                     "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
                     "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
                     "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
-                    "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel"
+                    "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel",
+                    "rekonstruktive Operationen (supraaortale Arterien)", "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                    "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)", "Operationen am Venensystem",
+                    "Grenzzonenamputationen/Ulkusversorgungen"
                 ],
                 "Intervention": [
                     "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
-                    "Thrombektomie over the wire"
+                    "Thrombektomie over the wire", "endovaskuläre Eingriffe", "Anlage von Dialyse-Shunts/Port-Implantation"
                 ],
                 "Prozedur": [
                     "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
-                    "Punktion/PE"
+                    "Punktion/PE", "intraoperative angiographische Untersuchungen", "hämodynamische Untersuchungen an Venen",
+                    "Doppler-/Duplex-Untersuchungen (Extremitäten)", "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
+                    "Doppler-/Duplex-Untersuchungen (extrakraniell)"
                 ]
             }
             eingriff = st.selectbox("Eingriff", eingriff_options[kategorie])
@@ -617,6 +657,7 @@ else:
             patient_id = st.text_input("Patienten-ID")
             diagnose = st.text_input("Diagnose")
             notizen = st.text_input("Notizen")
+            skills_acquired = st.checkbox("Kenntnisse, Erfahrungen und Fertigkeiten erworben")
             submitted = st.form_submit_button("Hinzufügen")
             if submitted:
                 if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
@@ -634,9 +675,9 @@ else:
                     user_id = (max_id or 0) + 1
                     try:
                         cursor.execute('''
-                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id))
+                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id, skills_acquired)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id, 1 if skills_acquired else 0))
                         conn.commit()
                         st.success("Operation erfolgreich registriert.")
                         zeige_eintraege()
