@@ -70,7 +70,7 @@ def iniciar_base_datos():
             notizen TEXT,
             username TEXT,
             user_id INTEGER,
-            skills_acquired INTEGER DEFAULT 0  -- New field for Kenntnisse, Erfahrungen und Fertigkeiten
+            skills_acquired INTEGER DEFAULT 0
         )
     ''')
     
@@ -161,10 +161,10 @@ def zeige_eintraege():
         else:
             st.write("Keine Einträge vorhanden.")
 
-# Mostrar Logbuch (para usuarios regulares) mit Ärztekammer-Struktur
+# Mostrar Logbuch (para usuarios regulares) mit verbessertem Format
 def zeige_logbuch():
     st.subheader("Logbuch zum Facharzt für Gefäßchirurgie")
-    st.write(f"Name, Vorname: {st.session_state.current_user} | Stand: {datetime.now().strftime('%d.%m.%Y')}")
+    st.write(f"Name, Vorname: {st.session_state.current_user} | Stand: {datetime.now().strftime('%d.%m.%Y %H:%M')} CEST")
     st.write("WbO der ÄKB 2004, 1. bis 8. Nachtrag")
 
     # Gefäßchirurgie-spezifische Kategorien und Richtzahlen (Pages 12-15)
@@ -184,25 +184,52 @@ def zeige_logbuch():
     }
 
     logbuch_data = []
-    for eingriff, richtzahl in gefaesschirurgie_procedures.items():
-        cursor.execute("""
-            SELECT COUNT(*), GROUP_CONCAT(datum || ' (' || (CASE WHEN skills_acquired = 1 THEN 'Ja' ELSE 'Nein' END) || ')') 
-            FROM operationen 
-            WHERE username = ? AND eingriff = ? AND kategorie = 'Operation' OR kategorie = 'Intervention' OR kategorie = 'Prozedur'
-        """, (st.session_state.current_user, eingriff))
-        count_result = cursor.fetchone()
-        count = count_result[0] if count_result[0] else 0
-        dates_skills = count_result[1] if count_result[1] else ""
-        logbuch_data.append([eingriff, richtzahl, dates_skills, "Ja" if count >= richtzahl else "Nein", "Unterschrift/Stempel erforderlich"])
+    current_year = datetime.now().year
+    years = range(current_year - 5, current_year + 1)  # Last 5 years + current year
 
-    df = pd.DataFrame(logbuch_data, columns=["Eingriff", "Richtzahl", "Anzahl/Datum (Kenntnisse erworben)", "Kenntnisse erworben", "Unterschrift/Stempel"])
-    st.dataframe(df, use_container_width=True)
+    for eingriff, richtzahl in gefaesschirurgie_procedures.items():
+        annual_counts = {}
+        total_count = 0
+        dates_skills = {}
+        
+        # Aggregate counts by year
+        for year in years:
+            cursor.execute("""
+                SELECT COUNT(*), GROUP_CONCAT(datum || ' (' || (CASE WHEN skills_acquired = 1 THEN 'Ja' ELSE 'Nein' END) || ')')
+                FROM operationen 
+                WHERE username = ? AND eingriff = ? AND strftime('%Y', datum_sort) = ?
+            """, (st.session_state.current_user, eingriff, str(year)))
+            count_result = cursor.fetchone()
+            count = count_result[0] if count_result[0] else 0
+            annual_counts[year] = count
+            dates_skills[year] = count_result[1] if count_result[1] else ""
+            total_count += count
+
+        # Determine progress color
+        progress = (total_count / richtzahl) * 100
+        color = "green" if progress >= 100 else "yellow" if progress >= 80 else "red"
+
+        # Add row to logbuch_data
+        row = [eingriff, richtzahl]
+        for year in years:
+            row.append(f"{annual_counts[year]} ({dates_skills[year]})" if annual_counts[year] > 0 else "-")
+        row.extend([total_count, f"{progress:.1f}%", color, "Unterschrift/Stempel erforderlich"])
+        logbuch_data.append(row)
+
+    df = pd.DataFrame(logbuch_data, columns=["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt", "Status", "Unterschrift/Stempel"])
+    st.dataframe(df.style.apply(lambda x: ['background-color: {}'.format(x["Status"]) if i == df.columns.get_loc("Fortschritt") else '' for i in range(len(x))], axis=1), use_container_width=True)
+
+    # Manual signature input
+    signature = st.text_area("Fügen Sie die Unterschrift/Stempel des Befugten ein (offline zu bestätigen):")
+    if signature:
+        st.write("Bitte drucken Sie das Logbuch aus und lassen Sie die Unterschrift vom Befugten bestätigen.")
 
     # Export options
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Eingriff", "Richtzahl", "Anzahl/Datum (Kenntnisse erworben)", "Kenntnisse erworben", "Unterschrift/Stempel"])
-    writer.writerows(logbuch_data)
+    writer.writerow(["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt", "Unterschrift/Stempel"])
+    for row in logbuch_data:
+        writer.writerow(row[:-2])  # Exclude Status and color from CSV
     csv_data = output.getvalue()
     st.download_button("Logbuch als CSV herunterladen", csv_data, f"logbuch_{st.session_state.current_user}.csv", "text/csv")
     
@@ -211,16 +238,22 @@ def zeige_logbuch():
         c = canvas.Canvas(buffer, pagesize=letter)
         c.setFont("Helvetica", 12)
         c.drawString(100, 750, f"Logbuch - {st.session_state.current_user}")
-        c.drawString(100, 730, f"Stand: {datetime.now().strftime('%d.%m.%Y')}")
+        c.drawString(100, 730, f"Stand: {datetime.now().strftime('%d.%m.%Y %H:%M')} CEST")
         c.drawString(100, 710, "WbO der ÄKB 2004, 1. bis 8. Nachtrag")
         y = 690
         for row in logbuch_data:
-            text = f"Eingriff: {row[0]} | Richtzahl: {row[1]} | Anzahl/Datum: {row[2]} | Kenntnisse: {row[3]} | Unterschrift: {row[4]}"
+            text = f"Eingriff: {row[0]} | Richtzahl: {row[1]} | "
+            for i, year in enumerate(years):
+                text += f"{year}: {row[2+i]} | "
+            text += f"Gesamt: {row[-4]} | Fortschritt: {row[-3]} | Unterschrift: {row[-1]}"
             c.drawString(50, y, text)
             y -= 20
             if y < 50:
                 c.showPage()
                 y = 750
+        if signature:
+            c.drawString(50, y, f"Unterschrift/Stempel: {signature}")
+            y -= 20
         c.save()
         buffer.seek(0)
         st.download_button("Logbuch als PDF herunterladen", buffer, f"logbuch_{st.session_state.current_user}.pdf", "application/pdf")
