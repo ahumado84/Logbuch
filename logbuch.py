@@ -72,8 +72,7 @@ def iniciar_base_datos():
             verschlusssystem TEXT,
             notizen TEXT,
             username TEXT,
-            user_id INTEGER,
-            skills_acquired INTEGER DEFAULT 0
+            user_id INTEGER
         )
     ''')
     
@@ -107,9 +106,6 @@ def iniciar_base_datos():
                     cursor.execute("UPDATE operationen SET datum_sort = ? WHERE id = ?", (datum_sort, id))
                 except ValueError:
                     pass
-        conn.commit()
-    if 'skills_acquired' not in columns:
-        cursor.execute("ALTER TABLE operationen ADD COLUMN skills_acquired INTEGER DEFAULT 0")
         conn.commit()
     
     conn.commit()
@@ -170,7 +166,7 @@ def zeige_logbuch():
     st.write(f"Name, Vorname: {st.session_state.current_user} | Stand: {datetime.now().strftime('%d.%m.%Y %H:%M')} CEST")
     st.write("WbO der ÄKB 2004, 1. bis 8. Nachtrag")
 
-    # Gefäßchirurgie-spezifische Kategorien und Richtzahlen (Pages 12-15)
+    # Gefäßchirurgie-spezifische Kategorien und Richtzahlen
     gefaesschirurgie_procedures = {
         "intraoperative angiographische Untersuchungen": 50,
         "Doppler-/Duplex-Untersuchungen (Extremitäten)": 300,
@@ -189,14 +185,13 @@ def zeige_logbuch():
     logbuch_data = []
     current_year = datetime.now().year
     cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
-    start_year = cursor.fetchone()[0] or 2020  # Fallback a 2020 si no está definido
+    start_year = cursor.fetchone()[0] or 2020
     years = range(start_year, current_year + 1)
 
     for eingriff, richtzahl in gefaesschirurgie_procedures.items():
         annual_counts = {}
         total_count = 0
         
-        # Aggregate counts by year
         for year in years:
             cursor.execute("""
                 SELECT COUNT(*)
@@ -207,25 +202,22 @@ def zeige_logbuch():
             annual_counts[year] = count
             total_count += count
 
-        # Determine progress
         progress = (total_count / richtzahl) * 100
-
-        # Add row to logbuch_data
         row = [eingriff, richtzahl]
         for year in years:
             row.append(str(annual_counts[year]) if annual_counts[year] > 0 else "-")
-        row.extend([total_count, f"{progress:.1f}%", "Unterschrift/Stempel erforderlich"])
+        row.extend([total_count, f"{progress:.1f}%"])
         logbuch_data.append(row)
 
-    df = pd.DataFrame(logbuch_data, columns=["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt", "Unterschrift/Stempel"])
+    df = pd.DataFrame(logbuch_data, columns=["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt"])
     st.dataframe(df, use_container_width=True)
 
     # Export options
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt", "Unterschrift/Stempel"])
+    writer.writerow(["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt"])
     for row in logbuch_data:
-        writer.writerow(row[:-1])  # Excluir solo color
+        writer.writerow(row)
     csv_data = output.getvalue()
     st.download_button("Logbuch als CSV herunterladen", csv_data, f"logbuch_{st.session_state.current_user}.csv", "text/csv")
     
@@ -241,7 +233,7 @@ def zeige_logbuch():
             text = f"Eingriff: {row[0]} | Richtzahl: {row[1]} | "
             for i, year in enumerate(years):
                 text += f"{year}: {row[2+i]} | "
-            text += f"Gesamt: {row[-3]} | Fortschritt: {row[-2]}"
+            text += f"Gesamt: {row[-2]} | Fortschritt: {row[-1]}"
             c.drawString(50, y, text)
             y -= 20
             if y < 50:
@@ -352,23 +344,22 @@ def master_edit_eintrag():
                 kategorie = st.selectbox("Kategorie", ["Operation", "Intervention", "Prozedur"], index=["Operation", "Intervention", "Prozedur"].index(entry[7]) if entry[7] in ["Operation", "Intervention", "Prozedur"] else 0)
                 eingriff_options = {
                     "Operation": [
-                        "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
-                        "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
-                        "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
-                        "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel",
-                        "rekonstruktive Operationen (supraaortale Arterien)", "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                        "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)", "Operationen am Venensystem",
+                        "rekonstruktive Operationen (supraaortale Arterien)",
+                        "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                        "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
+                        "Operationen am Venensystem",
                         "Grenzzonenamputationen/Ulkusversorgungen"
                     ],
                     "Intervention": [
-                        "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
-                        "Thrombektomie over the wire", "endovaskuläre Eingriffe", "Anlage von Dialyse-Shunts/Port-Implantation"
+                        "endovaskuläre Eingriffe",
+                        "Anlage von Dialyse-Shunts/Port-Implantation"
                     ],
                     "Prozedur": [
-                        "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
-                        "Punktion/PE", "intraoperative angiographische Untersuchungen", "hämodynamische Untersuchungen an Venen",
-                        "Doppler-/Duplex-Untersuchungen (Extremitäten)", "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
-                        "Doppler-/Duplex-Untersuchungen (extrakraniell)"
+                        "intraoperative angiographische Untersuchungen",
+                        "Doppler-/Duplex-Untersuchungen (Extremitäten)",
+                        "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
+                        "Doppler-/Duplex-Untersuchungen (extrakraniell)",
+                        "hämodynamische Untersuchungen an Venen"
                     ]
                 }
                 eingriff = st.selectbox("Eingriff", eingriff_options[kategorie], index=eingriff_options[kategorie].index(entry[3]) if entry[3] in eingriff_options[kategorie] else 0)
@@ -385,7 +376,6 @@ def master_edit_eintrag():
                 patient_id = st.text_input("Patienten-ID", value=entry[5])
                 diagnose = st.text_input("Diagnose", value=entry[6])
                 notizen = st.text_input("Notizen", value=entry[10] if entry[10] else "")
-                skills_acquired = st.checkbox("Kenntnisse, Erfahrungen und Fertigkeiten erworben", value=bool(entry[12]))
                 if st.form_submit_button("Änderungen speichern"):
                     if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
                         st.error("Alle Pflichtfelder müssen ausgefüllt sein.")
@@ -398,9 +388,9 @@ def master_edit_eintrag():
                         datum_str = datum.strftime('%d.%m.%Y')
                         try:
                             cursor.execute('''
-                                UPDATE operationen SET datum = ?, datum_sort = ?, eingriff = ?, rolle = ?, patient_id = ?, diagnose = ?, kategorie = ?, zugang = ?, verschlusssystem = ?, notizen = ?, skills_acquired = ?
+                                UPDATE operationen SET datum = ?, datum_sort = ?, eingriff = ?, rolle = ?, patient_id = ?, diagnose = ?, kategorie = ?, zugang = ?, verschlusssystem = ?, notizen = ?
                                 WHERE id = ?
-                            ''', (datum_str, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, 1 if skills_acquired else 0, db_id))
+                            ''', (datum_str, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, db_id))
                             conn.commit()
                             st.success("Eintrag erfolgreich bearbeitet.")
                             zeige_eintraege()
@@ -451,7 +441,7 @@ def backup_tables_csv():
     operationen_data = cursor.fetchall()
     operationen_output = io.StringIO()
     operationen_writer = csv.writer(operationen_output)
-    operationen_writer.writerow(["id", "datum", "datum_sort", "eingriff", "rolle", "patient_id", "diagnose", "kategorie", "zugang", "verschlusssystem", "notizen", "username", "user_id", "skills_acquired"])
+    operationen_writer.writerow(["id", "datum", "datum_sort", "eingriff", "rolle", "patient_id", "diagnose", "kategorie", "zugang", "verschlusssystem", "notizen", "username", "user_id"])
     operationen_writer.writerows(operationen_data)
     operationen_csv = operationen_output.getvalue()
     
@@ -666,23 +656,22 @@ else:
             kategorie = st.selectbox("Kategorie", ["Operation", "Intervention", "Prozedur"])
             eingriff_options = {
                 "Operation": [
-                    "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
-                    "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
-                    "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
-                    "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel",
-                    "rekonstruktive Operationen (supraaortale Arterien)", "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                    "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)", "Operationen am Venensystem",
+                    "rekonstruktive Operationen (supraaortale Arterien)",
+                    "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                    "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
+                    "Operationen am Venensystem",
                     "Grenzzonenamputationen/Ulkusversorgungen"
                 ],
                 "Intervention": [
-                    "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
-                    "Thrombektomie over the wire", "endovaskuläre Eingriffe", "Anlage von Dialyse-Shunts/Port-Implantation"
+                    "endovaskuläre Eingriffe",
+                    "Anlage von Dialyse-Shunts/Port-Implantation"
                 ],
                 "Prozedur": [
-                    "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
-                    "Punktion/PE", "intraoperative angiographische Untersuchungen", "hämodynamische Untersuchungen an Venen",
-                    "Doppler-/Duplex-Untersuchungen (Extremitäten)", "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
-                    "Doppler-/Duplex-Untersuchungen (extrakraniell)"
+                    "intraoperative angiographische Untersuchungen",
+                    "Doppler-/Duplex-Untersuchungen (Extremitäten)",
+                    "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
+                    "Doppler-/Duplex-Untersuchungen (extrakraniell)",
+                    "hämodynamische Untersuchungen an Venen"
                 ]
             }
             eingriff = st.selectbox("Eingriff", eingriff_options[kategorie])
@@ -699,7 +688,6 @@ else:
             patient_id = st.text_input("Patienten-ID")
             diagnose = st.text_input("Diagnose")
             notizen = st.text_input("Notizen")
-            skills_acquired = st.checkbox("Kenntnisse, Erfahrungen und Fertigkeiten erworben")
             submitted = st.form_submit_button("Hinzufügen")
             if submitted:
                 if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
@@ -718,9 +706,9 @@ else:
                     user_id = (max_id or 0) + 1
                     try:
                         cursor.execute('''
-                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id, skills_acquired)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (datum_str, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id, 1 if skills_acquired else 0))
+                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (datum_str, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id))
                         conn.commit()
                         st.success("Operation erfolgreich registriert.")
                         zeige_eintraege()
@@ -729,7 +717,10 @@ else:
         
         st.subheader("Operationen aus externer Quelle hinzufügen")
         with st.form(key="add_external_form"):
-            st.write("Fügen Sie die Anzahl der zuvor durchgeführten Operationen pro Kategorie hinzu:")
+            st.write("Fügen Sie die Anzahl der zuvor durchgeführten Operationen pro Kategorie und Jahr hinzu:")
+            cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
+            start_year = cursor.fetchone()[0] or 2020
+            years = list(range(start_year, datetime.now().year + 1))
             external_counts = {}
             for eingriff in [
                 "intraoperative angiographische Untersuchungen",
@@ -745,32 +736,43 @@ else:
                 "Operationen am Venensystem",
                 "Grenzzonenamputationen/Ulkusversorgungen"
             ]:
-                external_counts[eingriff] = st.number_input(f"Anzahl für {eingriff}", min_value=0, step=1, key=f"ext_{eingriff}")
-            external_date = st.date_input("Datum der Eingabe", value=datetime.now(), format="DD.MM.YYYY")
+                st.write(f"Anzahl für {eingriff}:")
+                external_counts[eingriff] = {}
+                for year in years:
+                    external_counts[eingriff][year] = st.number_input(f"{eingriff} - {year}", min_value=0, step=1, key=f"ext_{eingriff}_{year}")
             external_submitted = st.form_submit_button("Externe Operationen hinzufügen")
             if external_submitted:
-                if not external_date:
-                    st.error("Bitte wählen Sie ein Datum aus.")
-                else:
-                    try:
-                        datum_str = external_date.strftime('%d.%m.%Y')
-                        datum_sort = external_date.strftime('%Y-%m-%d')
-                        cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
-                        max_id = cursor.fetchone()[0]
-                        user_id = (max_id or 0) + 1
-                        for eingriff, count in external_counts.items():
+                try:
+                    cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
+                    max_id = cursor.fetchone()[0]
+                    user_id = (max_id or 0) + 1
+                    for eingriff in external_counts:
+                        kategorie = "Operation" if eingriff in [
+                            "rekonstruktive Operationen (supraaortale Arterien)",
+                            "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                            "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
+                            "Operationen am Venensystem",
+                            "Grenzzonenamputationen/Ulkusversorgungen"
+                        ] else "Intervention" if eingriff in [
+                            "endovaskuläre Eingriffe",
+                            "Anlage von Dialyse-Shunts/Port-Implantation"
+                        ] else "Prozedur"
+                        for year in years:
+                            count = external_counts[eingriff][year]
                             if count > 0:
+                                datum_str = f"01.01.{year}"
+                                datum_sort = f"{year}-01-01"
                                 for _ in range(count):
                                     cursor.execute('''
-                                        INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id, skills_acquired)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    ''', (datum_str, datum_sort, eingriff, "Operateur", "Extern", "Externe Eingabe", "Operation", "Externe Operation", st.session_state.current_user, user_id, 1))
+                                        INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    ''', (datum_str, datum_sort, eingriff, "Operateur", "Extern", "Externe Eingabe", kategorie, "Externe Operation", st.session_state.current_user, user_id))
                                     user_id += 1
-                        conn.commit()
-                        st.success("Externe Operationen erfolgreich hinzugefügt.")
-                        zeige_eintraege()
-                    except sqlite3.Error as e:
-                        st.error(f"Fehler beim Hinzufügen externer Operationen: {e}")
+                    conn.commit()
+                    st.success("Externe Operationen erfolgreich hinzugefügt.")
+                    zeige_eintraege()
+                except sqlite3.Error as e:
+                    st.error(f"Fehler beim Hinzufügen externer Operationen: {e}")
 
         # Logbuch Button
         if st.button("Logbuch anzeigen"):
@@ -799,10 +801,6 @@ else:
         suche_eintraege(suche_kriterium, wert, vom if 'vom' in locals() else None, bis if 'bis' in locals() else None)
     if st.button("Alle Einträge anzeigen"):
         zeige_eintraege()
-
-    # Table
-    st.subheader("Einträge")
-    zeige_eintraege()
 
     # Botones
     if not st.session_state.is_master and not st.session_state.is_tutor:
