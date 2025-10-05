@@ -542,6 +542,7 @@ if 'logged_in' not in st.session_state:
     st.session_state.current_user = None
     st.session_state.is_tutor = False
     st.session_state.is_master = False
+    st.session_state.show_external_form = False
 
 if not st.session_state.logged_in:
     tab1, tab2, tab3 = st.tabs(["Anmelden", "Registrieren", "Tutor Modus"])
@@ -616,6 +617,7 @@ else:
         st.session_state.current_user = None
         st.session_state.is_tutor = False
         st.session_state.is_master = False
+        st.session_state.show_external_form = False
         st.rerun()
 
     if st.session_state.is_master:
@@ -649,6 +651,70 @@ else:
                         st.error(f"Fehler beim Speichern des Jahres: {e}")
         else:
             st.write(f"Jahr des Weiterbildungsbeginns: {start_year} (kann nicht geändert werden)")
+
+        if st.button("Operationen aus externer Quelle hinzufügen"):
+            st.session_state.show_external_form = True
+
+        if st.session_state.get('show_external_form', False):
+            st.subheader("Operationen aus externer Quelle hinzufügen")
+            with st.form(key="add_external_form"):
+                st.write("Fügen Sie die Anzahl der zuvor durchgeführten Operationen pro Kategorie und Jahr hinzu:")
+                cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
+                start_year = cursor.fetchone()[0] or 2020
+                years = list(range(start_year, datetime.now().year + 1))
+                external_counts = {}
+                for eingriff in [
+                    "intraoperative angiographische Untersuchungen",
+                    "Doppler-/Duplex-Untersuchungen (Extremitäten)",
+                    "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
+                    "Doppler-/Duplex-Untersuchungen (extrakraniell)",
+                    "hämodynamische Untersuchungen an Venen",
+                    "rekonstruktive Operationen (supraaortale Arterien)",
+                    "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                    "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
+                    "endovaskuläre Eingriffe",
+                    "Anlage von Dialyse-Shunts/Port-Implantation",
+                    "Operationen am Venensystem",
+                    "Grenzzonenamputationen/Ulkusversorgungen"
+                ]:
+                    with st.expander(f"Anzahl für {eingriff}"):
+                        external_counts[eingriff] = {}
+                        for year in years:
+                            external_counts[eingriff][year] = st.number_input(f"{year}", min_value=0, step=1, key=f"ext_{eingriff}_{year}")
+                external_submitted = st.form_submit_button("Externe Operationen hinzufügen")
+                if external_submitted:
+                    try:
+                        cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
+                        max_id = cursor.fetchone()[0]
+                        user_id = (max_id or 0) + 1
+                        for eingriff in external_counts:
+                            kategorie = "Operation" if eingriff in [
+                                "rekonstruktive Operationen (supraaortale Arterien)",
+                                "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                                "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
+                                "Operationen am Venensystem",
+                                "Grenzzonenamputationen/Ulkusversorgungen"
+                            ] else "Intervention" if eingriff in [
+                                "endovaskuläre Eingriffe",
+                                "Anlage von Dialyse-Shunts/Port-Implantation"
+                            ] else "Prozedur"
+                            for year in years:
+                                count = external_counts[eingriff][year]
+                                if count > 0:
+                                    datum_str = f"01.01.{year}"
+                                    datum_sort = f"{year}-01-01"
+                                    for _ in range(count):
+                                        cursor.execute('''
+                                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        ''', (datum_str, datum_sort, eingriff, "Operateur", "Extern", "Externe Eingabe", kategorie, "Externe Operation", st.session_state.current_user, user_id))
+                                        user_id += 1
+                        conn.commit()
+                        st.success("Externe Operationen erfolgreich hinzugefügt.")
+                        st.session_state.show_external_form = False
+                        zeige_eintraege()
+                    except sqlite3.Error as e:
+                        st.error(f"Fehler beim Hinzufügen externer Operationen: {e}")
 
         st.subheader("Neue Operation hinzufügen")
         with st.form(key="add_form"):
@@ -714,65 +780,6 @@ else:
                         zeige_eintraege()
                     except sqlite3.Error as e:
                         st.error(f"Fehler beim Hinzufügen: {e}")
-        
-        st.subheader("Operationen aus externer Quelle hinzufügen")
-        with st.form(key="add_external_form"):
-            st.write("Fügen Sie die Anzahl der zuvor durchgeführten Operationen pro Kategorie und Jahr hinzu:")
-            cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
-            start_year = cursor.fetchone()[0] or 2020
-            years = list(range(start_year, datetime.now().year + 1))
-            external_counts = {}
-            for eingriff in [
-                "intraoperative angiographische Untersuchungen",
-                "Doppler-/Duplex-Untersuchungen (Extremitäten)",
-                "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
-                "Doppler-/Duplex-Untersuchungen (extrakraniell)",
-                "hämodynamische Untersuchungen an Venen",
-                "rekonstruktive Operationen (supraaortale Arterien)",
-                "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
-                "endovaskuläre Eingriffe",
-                "Anlage von Dialyse-Shunts/Port-Implantation",
-                "Operationen am Venensystem",
-                "Grenzzonenamputationen/Ulkusversorgungen"
-            ]:
-                st.write(f"Anzahl für {eingriff}:")
-                external_counts[eingriff] = {}
-                for year in years:
-                    external_counts[eingriff][year] = st.number_input(f"{eingriff} - {year}", min_value=0, step=1, key=f"ext_{eingriff}_{year}")
-            external_submitted = st.form_submit_button("Externe Operationen hinzufügen")
-            if external_submitted:
-                try:
-                    cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
-                    max_id = cursor.fetchone()[0]
-                    user_id = (max_id or 0) + 1
-                    for eingriff in external_counts:
-                        kategorie = "Operation" if eingriff in [
-                            "rekonstruktive Operationen (supraaortale Arterien)",
-                            "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                            "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
-                            "Operationen am Venensystem",
-                            "Grenzzonenamputationen/Ulkusversorgungen"
-                        ] else "Intervention" if eingriff in [
-                            "endovaskuläre Eingriffe",
-                            "Anlage von Dialyse-Shunts/Port-Implantation"
-                        ] else "Prozedur"
-                        for year in years:
-                            count = external_counts[eingriff][year]
-                            if count > 0:
-                                datum_str = f"01.01.{year}"
-                                datum_sort = f"{year}-01-01"
-                                for _ in range(count):
-                                    cursor.execute('''
-                                        INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    ''', (datum_str, datum_sort, eingriff, "Operateur", "Extern", "Externe Eingabe", kategorie, "Externe Operation", st.session_state.current_user, user_id))
-                                    user_id += 1
-                    conn.commit()
-                    st.success("Externe Operationen erfolgreich hinzugefügt.")
-                    zeige_eintraege()
-                except sqlite3.Error as e:
-                    st.error(f"Fehler beim Hinzufügen externer Operationen: {e}")
 
         # Logbuch Button
         if st.button("Logbuch anzeigen"):
