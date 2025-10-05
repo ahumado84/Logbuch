@@ -634,7 +634,7 @@ else:
         st.subheader("Datenbank sichern")
         backup_database()
         backup_tables_csv()
-       elif not st.session_state.is_tutor:
+    elif not st.session_state.is_tutor:
         st.subheader("Jahr des Weiterbildungsbeginns festlegen")
         cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
         start_year = cursor.fetchone()[0]
