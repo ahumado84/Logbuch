@@ -355,7 +355,7 @@ def master_edit_eintrag():
             cursor.execute("SELECT * FROM operationen WHERE id = ?", (db_id,))
             entry = cursor.fetchone()
             with st.form(key="edit_form"):
-                datum = st.text_input("Datum (TT.MM.JJJJ)", value=entry[1])
+                datum = st.date_input("Datum", value=None, format="DD.MM.YYYY"), value=entry[1])
                 kategorie = st.selectbox("Kategorie", ["Operation", "Intervention", "Prozedur"], index=["Operation", "Intervention", "Prozedur"].index(entry[7]) if entry[7] in ["Operation", "Intervention", "Prozedur"] else 0)
                 eingriff_options = {
                     "Operation": [
@@ -396,19 +396,20 @@ def master_edit_eintrag():
                 if st.form_submit_button("Änderungen speichern"):
                     if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
                         st.error("Alle Pflichtfelder müssen ausgefüllt sein.")
-                    elif not validar_fecha(datum):
-                        st.error("Ungültiges Datumsformat. Bitte verwenden Sie TT.MM.JJJJ.")
+                    elif not datum:
+                        st.error("Bitte wählen Sie ein Datum aus.")
                     elif kategorie == "Intervention" and not zugang:
                         st.error("Zugang muss für Intervention ausgewählt sein.")
                     elif kategorie == "Intervention" and zugang == "Punktion" and not verschlusssystem:
                         st.error("Verschlusssystem muss für Punktion ausgewählt sein.")
                     else:
-                        datum_sort = datetime.strptime(datum, '%d.%m.%Y').strftime('%Y-%m-%d')
+                        datum_sort = datum.strftime('%Y-%m-%d')
+                        datum_str = datum.strftime('%d.%m.%Y')
                         try:
                             cursor.execute('''
-                                UPDATE operationen SET datum = ?, datum_sort = ?, eingriff = ?, rolle = ?, patient_id = ?, diagnose = ?, kategorie = ?, zugang = ?, verschlusssystem = ?, notizen = ?, skills_acquired = ?
-                                WHERE id = ?
-                            ''', (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, 1 if skills_acquired else 0, db_id))
+                                INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id, skills_acquired)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (datum_str, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id, 1 if skills_acquired else 0))
                             conn.commit()
                             st.success("Eintrag erfolgreich bearbeitet.")
                             zeige_eintraege()
