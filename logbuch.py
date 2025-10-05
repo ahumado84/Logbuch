@@ -26,31 +26,34 @@ def iniciar_base_datos():
             username TEXT UNIQUE,
             password TEXT,
             is_tutor INTEGER DEFAULT 0,
-            is_master INTEGER DEFAULT 0
+            is_master INTEGER DEFAULT 0,
+            start_year INTEGER
         )
     ''')
     
-    # Verificar si la columna is_tutor y is_master existen y agregarlas si no
+    # Verificar si la columna is_tutor, is_master y start_year existen y agregarlas si no
     cursor.execute("PRAGMA table_info(users)")
     columns = [info[1] for info in cursor.fetchall()]
     if 'is_tutor' not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN is_tutor INTEGER DEFAULT 0")
     if 'is_master' not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN is_master INTEGER DEFAULT 0")
+    if 'start_year' not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN start_year INTEGER")
     
     # Inicializar usuario maestro si no existe
     cursor.execute("SELECT username, password, is_master FROM users WHERE username = ?", ("ahuvic",))
     user = cursor.fetchone()
     if not user:
         try:
-            cursor.execute("INSERT INTO users (username, password, is_master, is_tutor) VALUES (?, ?, ?, ?)", ("ahuvic", "rJimenez.1", 1, 0))
+            cursor.execute("INSERT INTO users (username, password, is_master, is_tutor, start_year) VALUES (?, ?, ?, ?, ?)", ("ahuvic", "rJimenez.1", 1, 0, 2020))
             conn.commit()
             st.write("Master user 'ahuvic' created successfully.")
         except sqlite3.Error as e:
             st.error(f"Error creating master user: {e}")
     else:
         if user[1] != "rJimenez.1" or user[2] != 1:
-            cursor.execute("UPDATE users SET password = ?, is_master = ? WHERE username = ?", ("rJimenez.1", 1, "ahuvic"))
+            cursor.execute("UPDATE users SET password = ?, is_master = ?, start_year = ? WHERE username = ?", ("rJimenez.1", 1, 2020, "ahuvic"))
             conn.commit()
             st.write("Master user 'ahuvic' updated successfully.")
     
@@ -185,51 +188,44 @@ def zeige_logbuch():
 
     logbuch_data = []
     current_year = datetime.now().year
-    years = range(current_year - 5, current_year + 1)  # Last 5 years + current year
+    cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
+    start_year = cursor.fetchone()[0] or 2020  # Fallback a 2020 si no está definido
+    years = range(start_year, current_year + 1)
 
     for eingriff, richtzahl in gefaesschirurgie_procedures.items():
         annual_counts = {}
         total_count = 0
-        dates_skills = {}
         
         # Aggregate counts by year
         for year in years:
             cursor.execute("""
-                SELECT COUNT(*), GROUP_CONCAT(datum || ' (' || (CASE WHEN skills_acquired = 1 THEN 'Ja' ELSE 'Nein' END) || ')')
+                SELECT COUNT(*)
                 FROM operationen 
                 WHERE username = ? AND eingriff = ? AND strftime('%Y', datum_sort) = ?
             """, (st.session_state.current_user, eingriff, str(year)))
-            count_result = cursor.fetchone()
-            count = count_result[0] if count_result[0] else 0
+            count = cursor.fetchone()[0] or 0
             annual_counts[year] = count
-            dates_skills[year] = count_result[1] if count_result[1] else ""
             total_count += count
 
-        # Determine progress color
+        # Determine progress
         progress = (total_count / richtzahl) * 100
-        color = "green" if progress >= 100 else "yellow" if progress >= 80 else "red"
 
         # Add row to logbuch_data
         row = [eingriff, richtzahl]
         for year in years:
-            row.append(f"{annual_counts[year]} ({dates_skills[year]})" if annual_counts[year] > 0 else "-")
-        row.extend([total_count, f"{progress:.1f}%", color, "Unterschrift/Stempel erforderlich"])
+            row.append(str(annual_counts[year]) if annual_counts[year] > 0 else "-")
+        row.extend([total_count, f"{progress:.1f}%", "Unterschrift/Stempel erforderlich"])
         logbuch_data.append(row)
 
-    df = pd.DataFrame(logbuch_data, columns=["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt", "Status", "Unterschrift/Stempel"])
-    st.dataframe(df.style.apply(lambda x: ['background-color: {}'.format(x["Status"]) if i == df.columns.get_loc("Fortschritt") else '' for i in range(len(x))], axis=1), use_container_width=True)
-
-    # Manual signature input
-    signature = st.text_area("Fügen Sie die Unterschrift/Stempel des Befugten ein (offline zu bestätigen):")
-    if signature:
-        st.write("Bitte drucken Sie das Logbuch aus und lassen Sie die Unterschrift vom Befugten bestätigen.")
+    df = pd.DataFrame(logbuch_data, columns=["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt", "Unterschrift/Stempel"])
+    st.dataframe(df, use_container_width=True)
 
     # Export options
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Eingriff", "Richtzahl"] + [f"{year}" for year in years] + ["Gesamtanzahl", "Fortschritt", "Unterschrift/Stempel"])
     for row in logbuch_data:
-        writer.writerow(row[:-2])  # Exclude Status and color from CSV
+        writer.writerow(row[:-1])  # Excluir solo color
     csv_data = output.getvalue()
     st.download_button("Logbuch als CSV herunterladen", csv_data, f"logbuch_{st.session_state.current_user}.csv", "text/csv")
     
@@ -245,15 +241,12 @@ def zeige_logbuch():
             text = f"Eingriff: {row[0]} | Richtzahl: {row[1]} | "
             for i, year in enumerate(years):
                 text += f"{year}: {row[2+i]} | "
-            text += f"Gesamt: {row[-4]} | Fortschritt: {row[-3]} | Unterschrift: {row[-1]}"
+            text += f"Gesamt: {row[-3]} | Fortschritt: {row[-2]}"
             c.drawString(50, y, text)
             y -= 20
             if y < 50:
                 c.showPage()
                 y = 750
-        if signature:
-            c.drawString(50, y, f"Unterschrift/Stempel: {signature}")
-            y -= 20
         c.save()
         buffer.seek(0)
         st.download_button("Logbuch als PDF herunterladen", buffer, f"logbuch_{st.session_state.current_user}.pdf", "application/pdf")
@@ -450,7 +443,7 @@ def backup_tables_csv():
     users_data = cursor.fetchall()
     users_output = io.StringIO()
     users_writer = csv.writer(users_output)
-    users_writer.writerow(["id", "username", "password", "is_tutor", "is_master"])
+    users_writer.writerow(["id", "username", "password", "is_tutor", "is_master", "start_year"])
     users_writer.writerows(users_data)
     users_csv = users_output.getvalue()
     
@@ -605,7 +598,7 @@ if not st.session_state.logged_in:
                 else:
                     is_tutor_reg = 1 if reg_type == "Tutor" else 0
                     try:
-                        cursor.execute("INSERT INTO users (username, password, is_tutor, is_master) VALUES (?, ?, ?, 0)", (reg_username, reg_password, is_tutor_reg))
+                        cursor.execute("INSERT INTO users (username, password, is_tutor, is_master, start_year) VALUES (?, ?, ?, 0, NULL)", (reg_username, reg_password, is_tutor_reg))
                         conn.commit()
                         st.success("Benutzer erfolgreich registriert.")
                     except sqlite3.IntegrityError:
@@ -650,6 +643,23 @@ else:
         backup_database()
         backup_tables_csv()
     elif not st.session_state.is_tutor:
+        st.subheader("Jahr des Weiterbildungsbeginns festlegen")
+        cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
+        start_year = cursor.fetchone()[0]
+        if start_year is None:
+            with st.form(key="start_year_form"):
+                start_year_input = st.number_input("Jahr des Weiterbildungsbeginns", min_value=2000, max_value=datetime.now().year, step=1)
+                if st.form_submit_button("Jahr speichern"):
+                    try:
+                        cursor.execute("UPDATE users SET start_year = ? WHERE username = ?", (start_year_input, st.session_state.current_user))
+                        conn.commit()
+                        st.success("Jahr des Weiterbildungsbeginns erfolgreich gespeichert.")
+                        st.rerun()
+                    except sqlite3.Error as e:
+                        st.error(f"Fehler beim Speichern des Jahres: {e}")
+        else:
+            st.write(f"Jahr des Weiterbildungsbeginns: {start_year} (kann nicht geändert werden)")
+
         st.subheader("Neue Operation hinzufügen")
         with st.form(key="add_form"):
             datum = st.date_input("Datum", value=None, format="DD.MM.YYYY")
