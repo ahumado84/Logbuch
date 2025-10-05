@@ -725,10 +725,10 @@ else:
         if st.button("Operationen aus externer Quelle hinzufügen"):
             cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
             start_year = cursor.fetchone()[0] or 2020
-            years = range(start_year, datetime.now().year + 1)
-            with st.form(key="add_external_form"):
+            years = list(range(start_year, datetime.now().year + 1))
+            with st.form(key=f"add_external_form_{st.session_state.current_user}"):
                 st.write("Fügen Sie die Anzahl der zuvor durchgeführten Operationen pro Kategorie und Jahr hinzu:")
-                selected_year = st.selectbox("Jahr auswählen", years, key="external_year")
+                selected_year = st.selectbox("Jahr auswählen", years, key=f"external_year_{st.session_state.current_user}")
                 external_counts = {}
                 for eingriff in [
                     "intraoperative angiographische Untersuchungen",
@@ -744,8 +744,8 @@ else:
                     "Operationen am Venensystem",
                     "Grenzzonenamputationen/Ulkusversorgungen"
                 ]:
-                    external_counts[eingriff] = st.number_input(f"Anzahl für {eingriff} im Jahr {selected_year}", min_value=0, step=1, key=f"ext_{eingriff}_{selected_year}")
-                external_date = st.date_input("Datum der Eingabe", value=datetime.now(), format="DD.MM.YYYY")
+                    external_counts[eingriff] = st.number_input(f"Anzahl für {eingriff} im Jahr {selected_year}", min_value=0, step=1, key=f"ext_{eingriff}_{st.session_state.current_user}")
+                external_date = st.date_input("Datum der Eingabe", value=datetime.now(), format="DD.MM.YYYY", key=f"external_date_{st.session_state.current_user}")
                 external_submitted = st.form_submit_button("Externe Operationen hinzufügen")
                 if external_submitted:
                     if not external_date:
@@ -753,7 +753,7 @@ else:
                     else:
                         try:
                             datum_str = external_date.strftime('%d.%m.%Y')
-                            datum_sort = external_date.strftime('%Y-%m-%d')
+                            datum_sort = f"{selected_year}-01-01"
                             cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
                             max_id = cursor.fetchone()[0]
                             user_id = (max_id or 0) + 1
@@ -763,10 +763,10 @@ else:
                                         cursor.execute('''
                                             INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id)
                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                        ''', (datum_str, f"{selected_year}-01-01", eingriff, "Operateur", "Extern", "Externe Eingabe", "Operation", f"Externe Operation Jahr {selected_year}", st.session_state.current_user, user_id))
+                                        ''', (datum_str, datum_sort, eingriff, "Operateur", "Extern", "Externe Eingabe", "Operation", f"Externe Operation Jahr {selected_year}", st.session_state.current_user, user_id))
                                         user_id += 1
                             conn.commit()
-                            st.success("Externe Operationen erfolgreich hinzugefügt.")
+                            st.success(f"Externe Operationen für das Jahr {selected_year} erfolgreich hinzugefügt.")
                             zeige_eintraege()
                         except sqlite3.Error as e:
                             st.error(f"Fehler beim Hinzufügen externer Operationen: {e}")
