@@ -634,7 +634,7 @@ else:
         st.subheader("Datenbank sichern")
         backup_database()
         backup_tables_csv()
-    elif not st.session_state.is_tutor:
+       elif not st.session_state.is_tutor:
         st.subheader("Jahr des Weiterbildungsbeginns festlegen")
         cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
         start_year = cursor.fetchone()[0]
@@ -651,6 +651,44 @@ else:
                         st.error(f"Fehler beim Speichern des Jahres: {e}")
         else:
             st.write(f"Jahr des Weiterbildungsbeginns: {start_year} (kann nicht geändert werden)")
+
+        st.subheader("Neue Operation hinzufügen")
+        with st.form(key="add_form"):
+            datum = st.date_input("Datum", value=None, format="DD.MM.YYYY")
+            eingriff_options = [
+                "rekonstruktive Operationen (supraaortale Arterien)",
+                "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
+                "Operationen am Venensystem",
+                "Grenzzonenamputationen/Ulkusversorgungen"
+            ]
+            eingriff = st.selectbox("Eingriff", eingriff_options)
+            rolle = st.selectbox("Rolle", ["Operateur", "Assistent"])
+            patient_id = st.text_input("Patienten-ID")
+            diagnose = st.text_input("Diagnose")
+            notizen = st.text_input("Notizen")
+            submitted = st.form_submit_button("Hinzufügen")
+            if submitted:
+                if not datum or not eingriff or not rolle or not patient_id or not diagnose:
+                    st.error("Alle Pflichtfelder müssen ausgefüllt sein.")
+                elif not datum:
+                    st.error("Bitte wählen Sie ein Datum aus.")
+                else:
+                    datum_sort = datum.strftime('%Y-%m-%d')
+                    datum_str = datum.strftime('%d.%m.%Y')
+                    cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
+                    max_id = cursor.fetchone()[0]
+                    user_id = (max_id or 0) + 1
+                    try:
+                        cursor.execute('''
+                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (datum_str, datum_sort, eingriff, rolle, patient_id, diagnose, "Operation", notizen, st.session_state.current_user, user_id))
+                        conn.commit()
+                        st.success("Operation erfolgreich registriert.")
+                        zeige_eintraege()
+                    except sqlite3.Error as e:
+                        st.error(f"Fehler beim Hinzufügen: {e}")
 
         if st.button("Operationen aus externer Quelle hinzufügen"):
             st.session_state.show_external_form = True
@@ -715,72 +753,6 @@ else:
                         zeige_eintraege()
                     except sqlite3.Error as e:
                         st.error(f"Fehler beim Hinzufügen externer Operationen: {e}")
-
-        st.subheader("Neue Operation hinzufügen")
-        with st.form(key="add_form"):
-            datum = st.date_input("Datum", value=None, format="DD.MM.YYYY")
-            kategorie = st.selectbox("Kategorie", ["Operation", "Intervention", "Prozedur"])
-            eingriff_options = {
-                "Operation": [
-                    "rekonstruktive Operationen (supraaortale Arterien)",
-                    "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                    "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
-                    "Operationen am Venensystem",
-                    "Grenzzonenamputationen/Ulkusversorgungen"
-                ],
-                "Intervention": [
-                    "endovaskuläre Eingriffe",
-                    "Anlage von Dialyse-Shunts/Port-Implantation"
-                ],
-                "Prozedur": [
-                    "intraoperative angiographische Untersuchungen",
-                    "Doppler-/Duplex-Untersuchungen (Extremitäten)",
-                    "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
-                    "Doppler-/Duplex-Untersuchungen (extrakraniell)",
-                    "hämodynamische Untersuchungen an Venen"
-                ]
-            }
-            eingriff = st.selectbox("Eingriff", eingriff_options[kategorie])
-            if kategorie == "Intervention":
-                zugang = st.selectbox("Zugang", ["Punktion", "Offen"])
-                if zugang == "Punktion":
-                    verschlusssystem = st.selectbox("Verschlusssystem", ["AngioSeal", "ProGlide"])
-                else:
-                    verschlusssystem = ""
-            else:
-                zugang = ""
-                verschlusssystem = ""
-            rolle = st.selectbox("Rolle", ["Operateur", "Assistent"])
-            patient_id = st.text_input("Patienten-ID")
-            diagnose = st.text_input("Diagnose")
-            notizen = st.text_input("Notizen")
-            submitted = st.form_submit_button("Hinzufügen")
-            if submitted:
-                if not datum or not eingriff or not rolle or not patient_id or not diagnose or not kategorie:
-                    st.error("Alle Pflichtfelder müssen ausgefüllt sein.")
-                elif not datum:
-                    st.error("Bitte wählen Sie ein Datum aus.")
-                elif kategorie == "Intervention" and not zugang:
-                    st.error("Zugang muss für Intervention ausgewählt sein.")
-                elif kategorie == "Intervention" and zugang == "Punktion" and not verschlusssystem:
-                    st.error("Verschlusssystem muss für Punktion ausgewählt sein.")
-                else:
-                    datum_sort = datum.strftime('%Y-%m-%d')
-                    datum_str = datum.strftime('%d.%m.%Y')
-                    cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
-                    max_id = cursor.fetchone()[0]
-                    user_id = (max_id or 0) + 1
-                    try:
-                        cursor.execute('''
-                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, username, user_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (datum_str, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, zugang, verschlusssystem, notizen, st.session_state.current_user, user_id))
-                        conn.commit()
-                        st.success("Operation erfolgreich registriert.")
-                        zeige_eintraege()
-                    except sqlite3.Error as e:
-                        st.error(f"Fehler beim Hinzufügen: {e}")
-
         # Logbuch Button
         if st.button("Logbuch anzeigen"):
             zeige_logbuch()
