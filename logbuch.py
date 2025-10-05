@@ -351,20 +351,15 @@ def master_edit_eintrag():
                         "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
                         "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
                         "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
-                        "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel",
-                        "rekonstruktive Operationen (supraaortale Arterien)", "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                        "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)", "Operationen am Venensystem",
-                        "Grenzzonenamputationen/Ulkusversorgungen"
+                        "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel"
                     ],
                     "Intervention": [
                         "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
-                        "Thrombektomie over the wire", "endovaskuläre Eingriffe", "Anlage von Dialyse-Shunts/Port-Implantation"
+                        "Thrombektomie over the wire"
                     ],
                     "Prozedur": [
                         "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
-                        "Punktion/PE", "intraoperative angiographische Untersuchungen", "hämodynamische Untersuchungen an Venen",
-                        "Doppler-/Duplex-Untersuchungen (Extremitäten)", "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
-                        "Doppler-/Duplex-Untersuchungen (extrakraniell)"
+                        "Punktion/PE"
                     ]
                 }
                 eingriff = st.selectbox("Eingriff", eingriff_options[kategorie], index=eingriff_options[kategorie].index(entry[3]) if entry[3] in eingriff_options[kategorie] else 0)
@@ -664,20 +659,15 @@ else:
                     "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
                     "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
                     "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
-                    "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel",
-                    "rekonstruktive Operationen (supraaortale Arterien)", "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                    "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)", "Operationen am Venensystem",
-                    "Grenzzonenamputationen/Ulkusversorgungen"
+                    "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel"
                 ],
                 "Intervention": [
                     "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
-                    "Thrombektomie over the wire", "endovaskuläre Eingriffe", "Anlage von Dialyse-Shunts/Port-Implantation"
+                    "Thrombektomie over the wire"
                 ],
                 "Prozedur": [
                     "ZVK-Anlage", "Drainage Thorax", "Drainage Abdomen", "Drainage Wunde Extremitäten",
-                    "Punktion/PE", "intraoperative angiographische Untersuchungen", "hämodynamische Untersuchungen an Venen",
-                    "Doppler-/Duplex-Untersuchungen (Extremitäten)", "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
-                    "Doppler-/Duplex-Untersuchungen (extrakraniell)"
+                    "Punktion/PE"
                 ]
             }
             eingriff = st.selectbox("Eingriff", eingriff_options[kategorie])
@@ -726,30 +716,39 @@ else:
             cursor.execute("SELECT start_year FROM users WHERE username = ?", (st.session_state.current_user,))
             start_year = cursor.fetchone()[0] or 2020
             years = list(range(start_year, datetime.now().year + 1))
-            with st.form(key=f"add_external_form_{st.session_state.current_user}"):
+            with st.form(key=f"add_external_form_{st.session_state.current_user}_{datetime.now().strftime('%Y%m%d%H%M%S')}"):
                 st.write("Fügen Sie die Anzahl der zuvor durchgeführten Operationen pro Kategorie und Jahr hinzu:")
                 selected_year = st.selectbox("Jahr auswählen", years, key=f"external_year_{st.session_state.current_user}")
-                external_counts = {}
-                for eingriff in [
-                    "intraoperative angiographische Untersuchungen",
-                    "Doppler-/Duplex-Untersuchungen (Extremitäten)",
-                    "Doppler-/Duplex-Untersuchungen (abdominell/retroperitoneal)",
-                    "Doppler-/Duplex-Untersuchungen (extrakraniell)",
-                    "hämodynamische Untersuchungen an Venen",
-                    "rekonstruktive Operationen (supraaortale Arterien)",
-                    "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
-                    "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
-                    "endovaskuläre Eingriffe",
-                    "Anlage von Dialyse-Shunts/Port-Implantation",
-                    "Operationen am Venensystem",
-                    "Grenzzonenamputationen/Ulkusversorgungen"
-                ]:
-                    external_counts[eingriff] = st.number_input(f"Anzahl für {eingriff} im Jahr {selected_year}", min_value=0, step=1, key=f"ext_{eingriff}_{st.session_state.current_user}")
+                logbuch_kategorie = st.selectbox(
+                    "Logbuch Kategorie",
+                    [
+                        "rekonstruktive Operationen (supraaortale Arterien)",
+                        "rekonstruktive Operationen (aortale/iliakale/viszerale/thorakale)",
+                        "rekonstruktive Operationen (femoro-popliteal/brachial/cruro-pedal)",
+                        "endovaskuläre Eingriffe",
+                        "Anlage von Dialyse-Shunts/Port-Implantation",
+                        "Operationen am Venensystem",
+                        "Grenzzonenamputationen/Ulkusversorgungen"
+                    ],
+                    key=f"logbuch_kategorie_{st.session_state.current_user}"
+                )
+                eingriff_options = [
+                    "Carotis EEA/TEA", "Aortenaneurysma Rohrprothese", "Aortenaneurysma Bypass",
+                    "Aortobi- oder monoiliakaler Bypass", "Aortobi- oder monofemoraler Bypass",
+                    "Iliofemoraler Bypass", "Crossover Bypass", "Femoralis TEA", "Fem-pop. P1 Bypass",
+                    "Fem-pop. P3 Bypass", "Fem-cruraler Bypass", "P1-P3 Bypass", "Wunddebridement - VAC Wechsel",
+                    "TEVAR", "FEVAR", "EVAR", "BEVAR", "Organstent", "Beckenstent", "Beinstent",
+                    "Thrombektomie over the wire"
+                ]
+                eingriff = st.selectbox("Eingriff", eingriff_options, key=f"eingriff_external_{st.session_state.current_user}")
+                count = st.number_input(f"Anzahl für {logbuch_kategorie} im Jahr {selected_year}", min_value=0, step=1, key=f"count_{logbuch_kategorie}_{st.session_state.current_user}")
                 external_date = st.date_input("Datum der Eingabe", value=datetime.now(), format="DD.MM.YYYY", key=f"external_date_{st.session_state.current_user}")
                 external_submitted = st.form_submit_button("Externe Operationen hinzufügen")
                 if external_submitted:
                     if not external_date:
                         st.error("Bitte wählen Sie ein Datum aus.")
+                    elif count == 0:
+                        st.error("Bitte geben Sie eine Anzahl größer als 0 ein.")
                     else:
                         try:
                             datum_str = external_date.strftime('%d.%m.%Y')
@@ -757,16 +756,14 @@ else:
                             cursor.execute("SELECT MAX(user_id) FROM operationen WHERE username = ?", (st.session_state.current_user,))
                             max_id = cursor.fetchone()[0]
                             user_id = (max_id or 0) + 1
-                            for eingriff, count in external_counts.items():
-                                if count > 0:
-                                    for _ in range(count):
-                                        cursor.execute('''
-                                            INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                        ''', (datum_str, datum_sort, eingriff, "Operateur", "Extern", "Externe Eingabe", "Operation", f"Externe Operation Jahr {selected_year}", st.session_state.current_user, user_id))
-                                        user_id += 1
+                            for _ in range(count):
+                                cursor.execute('''
+                                    INSERT INTO operationen (datum, datum_sort, eingriff, rolle, patient_id, diagnose, kategorie, notizen, username, user_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (datum_str, datum_sort, logbuch_kategorie, "Operateur", "Extern", "Externe Eingabe", "Operation", f"Externe Operation: {eingriff} Jahr {selected_year}", st.session_state.current_user, user_id))
+                                user_id += 1
                             conn.commit()
-                            st.success(f"Externe Operationen für das Jahr {selected_year} erfolgreich hinzugefügt.")
+                            st.success(f"Externe Operationen für {logbuch_kategorie} im Jahr {selected_year} erfolgreich hinzugefügt.")
                             zeige_eintraege()
                         except sqlite3.Error as e:
                             st.error(f"Fehler beim Hinzufügen externer Operationen: {e}")
