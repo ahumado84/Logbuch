@@ -153,7 +153,16 @@ def get_conn():
     conn = sqlite3.connect("chirurgischer_bericht.db", check_same_thread=False)
     cur  = conn.cursor()
     cur.execute("""CREATE TABLE IF NOT EXISTS users
-        (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT)""")
+        (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password TEXT,
+         security_question TEXT, security_answer TEXT)""")
+    cur.execute("PRAGMA table_info(users)")
+    user_cols = [r[1] for r in cur.fetchall()]
+    for col, sql in [
+        ("security_question", "ALTER TABLE users ADD COLUMN security_question TEXT"),
+        ("security_answer",   "ALTER TABLE users ADD COLUMN security_answer TEXT"),
+    ]:
+        if col not in user_cols:
+            cur.execute(sql)
     cur.execute("""CREATE TABLE IF NOT EXISTS operationen (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         datum TEXT, datum_sort TEXT, eingriff TEXT, rolle TEXT,
@@ -321,7 +330,7 @@ if not st.session_state.logged_in:
           <p style="color:{C['muted']};font-size:13px;margin:0">Chirurgisches Logbuch</p>
         </div>""", unsafe_allow_html=True)
 
-        tab_login, tab_reg, tab_tutor = st.tabs(["Anmelden", "Registrieren", "Tutor Modus"])
+        tab_login, tab_reg, tab_tutor, tab_reset = st.tabs(["Anmelden", "Registrieren", "Tutor Modus", "🔑 Passwort vergessen"])
 
         with tab_login:
             with st.form("form_login"):
@@ -339,16 +348,27 @@ if not st.session_state.logged_in:
 
         with tab_reg:
             with st.form("form_reg"):
-                u = st.text_input("Benutzername", key="reg_u")
-                p = st.text_input("Passwort", type="password", key="reg_p")
+                u  = st.text_input("Benutzername", key="reg_u")
+                p  = st.text_input("Passwort", type="password", key="reg_p")
+                sq = st.selectbox("Sicherheitsfrage", [
+                    "Name des ersten Haustieres?",
+                    "Geburtsstadt der Mutter?",
+                    "Name der Grundschule?",
+                    "Lieblingsfilm als Kind?",
+                    "Name des besten Freundes als Kind?",
+                ], key="reg_sq")
+                sa = st.text_input("Antwort auf Sicherheitsfrage", key="reg_sa",
+                                   help="Antwort wird verschlüsselt gespeichert.")
                 if st.form_submit_button("Registrieren", use_container_width=True):
-                    if not u or not p:
+                    if not u or not p or not sa:
                         st.error("Alle Felder erforderlich.")
                     else:
                         try:
                             conn = get_conn()
-                            conn.execute("INSERT INTO users (username,password) VALUES (?,?)",
-                                         (u, hash_pw(p)))
+                            conn.execute(
+                                "INSERT INTO users (username,password,security_question,security_answer) "
+                                "VALUES (?,?,?,?)",
+                                (u, hash_pw(p), sq, hash_pw(sa.strip().lower())))
                             conn.commit()
                             st.success("Benutzer registriert. Bitte anmelden.")
                         except sqlite3.IntegrityError:
@@ -365,6 +385,52 @@ if not st.session_state.logged_in:
                         st.rerun()
                     else:
                         st.error("Ungültiges Tutor-Passwort.")
+
+        with tab_reset:
+            st.markdown(
+                f"<p style='color:{C['muted']};font-size:12px;margin-bottom:12px'>"
+                "Gib deinen Benutzernamen ein, beantworte die Sicherheitsfrage "
+                "und vergib ein neues Passwort.</p>", unsafe_allow_html=True)
+
+            reset_u = st.text_input("Benutzername", key="rst_u")
+
+            if reset_u:
+                cur = get_cur()
+                cur.execute("SELECT security_question FROM users WHERE username=?", (reset_u,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    st.markdown(
+                        f"<p style='color:{C['accent']};font-size:13px;"
+                        f"font-weight:600;margin:8px 0 4px'>🔐 {row[0]}</p>",
+                        unsafe_allow_html=True)
+                    with st.form("form_reset"):
+                        rst_ans = st.text_input("Deine Antwort", key="rst_ans")
+                        rst_p1  = st.text_input("Neues Passwort", type="password", key="rst_p1")
+                        rst_p2  = st.text_input("Passwort bestätigen", type="password", key="rst_p2")
+                        if st.form_submit_button("Passwort zurücksetzen", use_container_width=True):
+                            if not rst_ans or not rst_p1:
+                                st.error("Alle Felder erforderlich.")
+                            elif rst_p1 != rst_p2:
+                                st.error("Passwörter stimmen nicht überein.")
+                            else:
+                                cur2 = get_cur()
+                                cur2.execute(
+                                    "SELECT id FROM users WHERE username=? AND security_answer=?",
+                                    (reset_u, hash_pw(rst_ans.strip().lower())))
+                                if cur2.fetchone():
+                                    conn = get_conn()
+                                    conn.execute(
+                                        "UPDATE users SET password=? WHERE username=?",
+                                        (hash_pw(rst_p1), reset_u))
+                                    conn.commit()
+                                    st.success("✓ Passwort erfolgreich geändert. Bitte anmelden.")
+                                else:
+                                    st.error("Antwort falsch. Bitte erneut versuchen.")
+                elif row and not row[0]:
+                    st.warning("Für diesen Benutzer ist keine Sicherheitsfrage hinterlegt. "
+                               "Bitte wende dich an den Tutor (tutor01).")
+                else:
+                    st.info("Benutzername nicht gefunden.")
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -460,8 +526,9 @@ if page == "📊 Dashboard":
                 line=dict(color=col_k, width=2.5),
                 marker=dict(size=6, color=col_k,
                             line=dict(color=C["bg"], width=1.5)),
-                fill="tozeroy", fillcolor=col_k.replace(")", ",0.06)").replace("rgb", "rgba")
-                    if col_k.startswith("rgb") else col_k + "10",
+                fill="tozeroy",
+                fillcolor="rgba({},{},{},0.08)".format(
+                    int(col_k[1:3],16), int(col_k[3:5],16), int(col_k[5:7],16)),
             ))
 
         # Acumulada en eje secundario
