@@ -268,12 +268,16 @@ PLOTLY_LAYOUT = dict(
     paper_bgcolor=C["panel"], plot_bgcolor=C["bg"],
     font_color=C["text"], font_size=11,
     margin=dict(l=10, r=10, t=30, b=10),
-    legend=dict(bgcolor="rgba(0,0,0,0)", font_color=C["muted"]),
-    xaxis=dict(gridcolor=C["border"], linecolor=C["border"],
-               tickfont_color=C["muted"]),
-    yaxis=dict(gridcolor=C["border"], linecolor=C["border"],
-               tickfont_color=C["muted"]),
 )
+
+# Axis style helper - apply to each figure individually
+def _axis_style():
+    return dict(gridcolor=C["border"], linecolor=C["border"], tickfont_color=C["muted"])
+
+def _legend_style(**kwargs):
+    base = dict(bgcolor="rgba(0,0,0,0)", font_color=C["muted"])
+    base.update(kwargs)
+    return base
 
 def progress_bar_html(label, current, goal, color):
     pct      = min(current / goal, 1.0) if goal else 0
@@ -544,10 +548,12 @@ if page == "📊 Dashboard":
             **PLOTLY_LAYOUT,
             title=dict(text=f"Monatsverlauf {year}", font_color=C["text"], font_size=13),
             height=320,
+            xaxis=_axis_style(),
+            yaxis=_axis_style(),
             yaxis2=dict(overlaying="y", side="right",
-                        gridcolor=C["border"], tickfont_color=C["muted"],
+                        **_axis_style(),
                         title=dict(text="Kumuliert", font_color=C["muted"])),
-            legend=dict(orientation="h", y=-0.2),
+            legend=_legend_style(orientation="h", y=-0.2),
         )
         st.plotly_chart(fig_line, use_container_width=True)
 
@@ -591,7 +597,9 @@ if page == "📊 Dashboard":
                 barmode="stack", height=250,
                 title=dict(text="Eingriffe gesamt nach Benutzer",
                            font_color=C["text"], font_size=12),
-                legend=dict(orientation="h", y=-0.3),
+                xaxis=_axis_style(),
+                yaxis=_axis_style(),
+                legend=_legend_style(orientation="h", y=-0.3),
             )
             col_r1, col_r2 = st.columns([1.5, 1])
             with col_r1:
@@ -624,7 +632,9 @@ if page == "📊 Dashboard":
                 )
                 fig_top.update_layout(**PLOTLY_LAYOUT, height=280,
                                       showlegend=True,
-                                      legend=dict(orientation="h", y=-0.3))
+                                      xaxis=_axis_style(),
+                                      yaxis=_axis_style(),
+                                      legend=_legend_style(orientation="h", y=-0.3))
                 st.plotly_chart(fig_top, use_container_width=True)
             with col_t2:
                 st.dataframe(df_top, use_container_width=True, hide_index=True)
