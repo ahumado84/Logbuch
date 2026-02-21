@@ -438,7 +438,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# APP PRINCIPAL
+# APP PRINCIPAL — layout único
 # ══════════════════════════════════════════════════════════════════════════════
 username  = st.session_state.username
 is_tutor  = st.session_state.is_tutor
@@ -455,13 +455,7 @@ with st.sidebar:
     </div>""", unsafe_allow_html=True)
     st.divider()
 
-    # Navegación
-    page = st.radio("Navigation", ["📊 Dashboard", "📋 Logbuch", "➕ Neue Operation"],
-                    label_visibility="collapsed")
-
-    st.divider()
-
-    # Selector de año (para dashboard)
+    # Selector de año
     st.markdown(f"<p style='color:{C['muted']};font-size:11px;font-weight:700;"
                 f"text-transform:uppercase;letter-spacing:1px'>Anzeige-Jahr</p>",
                 unsafe_allow_html=True)
@@ -479,287 +473,190 @@ with st.sidebar:
 
     st.divider()
     if st.button("🚪 Abmelden", use_container_width=True):
-        for k in ["logged_in","username","is_tutor"]:
+        for k in ["logged_in", "username", "is_tutor"]:
             st.session_state[k] = False if k != "username" else ""
         st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PÁGINA: DASHBOARD
+# SECCIÓN 1: DASHBOARD (siempre visible)
 # ══════════════════════════════════════════════════════════════════════════════
-if page == "📊 Dashboard":
-    uname_dash = None if is_tutor else username
-    totals  = fetch_totals(uname_dash)
-    roles   = fetch_roles(uname_dash)
-    monthly = fetch_monthly(uname_dash, year)
-    total_n = sum(totals.values())
+uname_dash = None if is_tutor else username
+totals  = fetch_totals(uname_dash)
+roles   = fetch_roles(uname_dash)
+monthly = fetch_monthly(uname_dash, year)
 
-    st.markdown(f"<h2 style='color:{C['text']};margin:0 0 20px'>📊 Dashboard "
-                f"{'— Alle Residenten' if is_tutor else '— ' + username} · {year}</h2>",
-                unsafe_allow_html=True)
-
-    # ── KPI Cards ──
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    kpi_data = [
-        (k1, total_n,                       "Gesamt",         ""),
-        (k2, roles.get("Operateur", 0),     "Operateur",      "delta_off"),
-        (k3, roles.get("Assistent", 0),     "Assistent",      "delta_off"),
-        (k4, totals.get("Operation", 0),    "Operationen",    f"Ziel {ANNUAL_GOALS['Operation']}"),
-        (k5, totals.get("Intervention", 0), "Interventionen", f"Ziel {ANNUAL_GOALS['Intervention']}"),
-        (k6, totals.get("Prozedur", 0),     "Prozeduren",     f"Ziel {ANNUAL_GOALS['Prozedur']}"),
-    ]
-    for col, val, label, sub in kpi_data:
-        with col:
-            st.metric(label, val, delta=None)
-
-    st.divider()
-
-    # ── Charts: línea mensual + panel derecho ──
-    col_chart, col_right = st.columns([2.2, 1])
-
-    with col_chart:
-        # Gráfico de línea mensual
-        m_lbls = [calendar.month_abbr[m] for m in range(1, 13)]
-        fig_line = go.Figure()
-        kat_colors = [C["op"], C["interv"], C["proz"]]
-
-        for kat, col_k in zip(KATEGORIEN, kat_colors):
-            vals = [monthly[m].get(kat, 0) for m in range(1, 13)]
-            fig_line.add_trace(go.Scatter(
-                x=m_lbls, y=vals, name=kat,
-                mode="lines+markers",
-                line=dict(color=col_k, width=2.5),
-                marker=dict(size=6, color=col_k,
-                            line=dict(color=C["bg"], width=1.5)),
-                fill="tozeroy",
-                fillcolor="rgba({},{},{},0.08)".format(
-                    int(col_k[1:3],16), int(col_k[3:5],16), int(col_k[5:7],16)),
-            ))
-
-        # Acumulada en eje secundario
-        cumul = []; acc = 0
-        for m in range(1, 13):
-            acc += sum(monthly[m].values()); cumul.append(acc)
-        fig_line.add_trace(go.Scatter(
-            x=m_lbls, y=cumul, name="Kumuliert",
-            mode="lines", yaxis="y2",
-            line=dict(color=C["yellow"], width=2, dash="dot"),
-        ))
-        fig_line.update_layout(
-            **PLOTLY_LAYOUT,
-            title=dict(text=f"Monatsverlauf {year}", font_color=C["text"], font_size=13),
-            height=320,
-            xaxis=_axis_style(),
-            yaxis=_axis_style(),
-            yaxis2=dict(overlaying="y", side="right",
-                        **_axis_style(),
-                        title=dict(text="Kumuliert", font_color=C["muted"])),
-            legend=_legend_style(orientation="h", y=-0.2),
-        )
-        st.plotly_chart(fig_line, use_container_width=True)
-
-    with col_right:
-        # ── Barras de progreso ──
-        st.markdown(f"<p class='section-title'>Jahresziele {year}</p>",
-                    unsafe_allow_html=True)
-        for kat, col_k in zip(KATEGORIEN, kat_colors):
-            html = progress_bar_html(kat, totals.get(kat, 0), ANNUAL_GOALS[kat], col_k)
-            st.markdown(html, unsafe_allow_html=True)
-
-        st.markdown(f"<p class='section-title' style='margin-top:16px'>Rolle</p>",
-                    unsafe_allow_html=True)
-        total_r = sum(roles.values()) or 1
-        st.markdown(
-            progress_bar_html("Operateur", roles.get("Operateur", 0), total_r, C["accent"]) +
-            progress_bar_html("Assistent", roles.get("Assistent", 0), total_r, C["accent2"]),
+st.markdown(f"<h2 style='color:{C['text']};margin:0 0 16px'>📊 Dashboard "
+            f"{'— Alle Residenten' if is_tutor else '— ' + username} · {year}</h2>",
             unsafe_allow_html=True)
 
-    st.divider()
+# ── KPI Cards ──
+k1, k2, k3, k4, k5, k6 = st.columns(6)
+total_n = sum(totals.values())
+kpi_data = [
+    (k1, total_n,                       "Gesamt"),
+    (k2, roles.get("Operateur", 0),     "Operateur"),
+    (k3, roles.get("Assistent", 0),     "Assistent"),
+    (k4, totals.get("Operation", 0),    "Operationen"),
+    (k5, totals.get("Intervention", 0), "Interventionen"),
+    (k6, totals.get("Prozedur", 0),     "Prozeduren"),
+]
+for col, val, label in kpi_data:
+    with col:
+        st.metric(label, val)
 
-    # ── Fila inferior: ranking tutor / resumen eingriffe residente ──
-    if is_tutor:
-        st.markdown(f"<h4 style='color:{C['text']}'>🏆 Ranking Residenten</h4>",
-                    unsafe_allow_html=True)
-        ranking = fetch_ranking()
-        if ranking:
-            df_rank = pd.DataFrame(ranking,
-                columns=["Benutzer","Total","Operation","Intervention","Prozedur"])
+st.divider()
 
-            # Gráfico de barras horizontal apilado
-            fig_rank = go.Figure()
-            for kat, col_k in zip(KATEGORIEN, kat_colors):
-                fig_rank.add_trace(go.Bar(
-                    y=df_rank["Benutzer"], x=df_rank[kat],
-                    name=kat, orientation="h",
-                    marker_color=col_k, opacity=0.88,
-                ))
-            fig_rank.update_layout(
-                **PLOTLY_LAYOUT,
-                barmode="stack", height=250,
-                title=dict(text="Eingriffe gesamt nach Benutzer",
-                           font_color=C["text"], font_size=12),
-                xaxis=_axis_style(),
-                yaxis=_axis_style(),
-                legend=_legend_style(orientation="h", y=-0.3),
-            )
-            col_r1, col_r2 = st.columns([1.5, 1])
-            with col_r1:
-                st.plotly_chart(fig_rank, use_container_width=True)
-            with col_r2:
-                # Tabla con colores
-                df_display = df_rank.copy()
-                st.dataframe(
-                    df_display.style
-                        .highlight_max(subset=["Total"], color=C["yellow"] + "44")
-                        .format({"Total": "{}", "Operation": "{}",
-                                 "Intervention": "{}", "Prozedur": "{}"}),
-                    use_container_width=True, hide_index=True)
-        else:
-            st.info("Noch keine Daten vorhanden.")
-    else:
-        # Tabla top eingriffe del residente
-        st.markdown(f"<h4 style='color:{C['text']}'>📌 Top Eingriffe</h4>",
-                    unsafe_allow_html=True)
-        rows = fetch_top_eingriffe(username)
-        if rows:
-            df_top = pd.DataFrame(rows, columns=["Eingriff", "Rolle", "n"])
+# ── Fila: gráfico mensual + metas ──
+col_chart, col_right = st.columns([2.2, 1])
 
-            col_t1, col_t2 = st.columns([1.5, 1])
-            with col_t1:
-                fig_top = px.bar(
-                    df_top, x="n", y="Eingriff", color="Rolle",
-                    orientation="h",
-                    color_discrete_map={"Operateur": C["accent"], "Assistent": C["accent2"]},
-                )
-                fig_top.update_layout(**PLOTLY_LAYOUT, height=280,
-                                      showlegend=True,
-                                      xaxis=_axis_style(),
-                                      yaxis=_axis_style(),
-                                      legend=_legend_style(orientation="h", y=-0.3))
-                st.plotly_chart(fig_top, use_container_width=True)
-            with col_t2:
-                st.dataframe(df_top, use_container_width=True, hide_index=True)
-        else:
-            st.info("Noch keine Eingriffe vorhanden.")
+with col_chart:
+    m_lbls = [calendar.month_abbr[m] for m in range(1, 13)]
+    fig_line = go.Figure()
+    kat_colors = [C["op"], C["interv"], C["proz"]]
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PÁGINA: LOGBUCH
-# ══════════════════════════════════════════════════════════════════════════════
-elif page == "📋 Logbuch":
-    st.markdown(f"<h2 style='color:{C['text']};margin:0 0 16px'>📋 Logbuch</h2>",
+    for kat, col_k in zip(KATEGORIEN, kat_colors):
+        vals = [monthly[m].get(kat, 0) for m in range(1, 13)]
+        r, g, b = int(col_k[1:3],16), int(col_k[3:5],16), int(col_k[5:7],16)
+        fig_line.add_trace(go.Scatter(
+            x=m_lbls, y=vals, name=kat,
+            mode="lines+markers",
+            line=dict(color=col_k, width=2.5),
+            marker=dict(size=6, color=col_k, line=dict(color=C["bg"], width=1.5)),
+            fill="tozeroy",
+            fillcolor=f"rgba({r},{g},{b},0.08)",
+        ))
+
+    cumul = []; acc = 0
+    for m in range(1, 13):
+        acc += sum(monthly[m].values()); cumul.append(acc)
+    fig_line.add_trace(go.Scatter(
+        x=m_lbls, y=cumul, name="Kumuliert",
+        mode="lines", yaxis="y2",
+        line=dict(color=C["yellow"], width=2, dash="dot"),
+    ))
+    fig_line.update_layout(
+        **PLOTLY_LAYOUT,
+        title=dict(text=f"Monatsverlauf {year}", font_color=C["text"], font_size=13),
+        height=300,
+        xaxis=_axis_style(),
+        yaxis=_axis_style(),
+        yaxis2=dict(overlaying="y", side="right", **_axis_style(),
+                    title=dict(text="Kumuliert", font_color=C["muted"])),
+        legend=_legend_style(orientation="h", y=-0.25),
+    )
+    st.plotly_chart(fig_line, use_container_width=True)
+
+with col_right:
+    st.markdown(f"<p class='section-title'>Jahresziele {year}</p>",
                 unsafe_allow_html=True)
+    for kat, col_k in zip(KATEGORIEN, kat_colors):
+        html = progress_bar_html(kat, totals.get(kat, 0), ANNUAL_GOALS[kat], col_k)
+        st.markdown(html, unsafe_allow_html=True)
 
-    # ── Filtros ──
-    with st.expander("🔍 Suchen & Filtern", expanded=True):
-        fc1, fc2, fc3 = st.columns(3)
-        with fc1:
-            filter_kat = st.selectbox("Kategorie", ["Alle"] + KATEGORIEN)
-        with fc2:
-            filter_rolle = st.selectbox("Rolle", ["Alle", "Operateur", "Assistent"])
-        with fc3:
-            if is_tutor:
-                cur = get_cur()
-                cur.execute("SELECT username FROM users")
-                all_users = ["Alle"] + [r[0] for r in cur.fetchall()]
-                filter_user = st.selectbox("Benutzer", all_users)
-            else:
-                filter_user = username
+    st.markdown(f"<p class='section-title' style='margin-top:16px'>Rolle</p>",
+                unsafe_allow_html=True)
+    total_r = sum(roles.values()) or 1
+    st.markdown(
+        progress_bar_html("Operateur", roles.get("Operateur", 0), total_r, C["accent"]) +
+        progress_bar_html("Assistent", roles.get("Assistent", 0), total_r, C["accent2"]),
+        unsafe_allow_html=True)
 
-    # Construir query con filtros
-    conditions, params = [], ()
-    if filter_kat != "Alle":
-        conditions.append("kategorie=?"); params += (filter_kat,)
-    if filter_rolle != "Alle":
-        conditions.append("rolle=?"); params += (filter_rolle,)
-    if is_tutor and filter_user != "Alle":
-        conditions.append("username=?"); params += (filter_user,)
+# ── Fila: ranking (tutor) o top eingriffe (residente) ──
+st.divider()
 
-    extra = " AND ".join(conditions)
-    df = fetch_ops(username, is_tutor, extra, params)
-
-    # ── Tabla ──
-    if df.empty:
-        st.info("Keine Einträge vorhanden.")
+if is_tutor:
+    st.markdown(f"<h4 style='color:{C['text']}'>🏆 Ranking Residenten</h4>",
+                unsafe_allow_html=True)
+    ranking = fetch_ranking()
+    if ranking:
+        df_rank = pd.DataFrame(ranking,
+            columns=["Benutzer","Total","Operation","Intervention","Prozedur"])
+        fig_rank = go.Figure()
+        for kat, col_k in zip(KATEGORIEN, kat_colors):
+            fig_rank.add_trace(go.Bar(
+                y=df_rank["Benutzer"], x=df_rank[kat],
+                name=kat, orientation="h",
+                marker_color=col_k, opacity=0.88,
+            ))
+        fig_rank.update_layout(
+            **PLOTLY_LAYOUT,
+            barmode="stack", height=250,
+            title=dict(text="Eingriffe gesamt nach Benutzer",
+                       font_color=C["text"], font_size=12),
+            xaxis=_axis_style(),
+            yaxis=_axis_style(),
+            legend=_legend_style(orientation="h", y=-0.3),
+        )
+        col_r1, col_r2 = st.columns([1.5, 1])
+        with col_r1:
+            st.plotly_chart(fig_rank, use_container_width=True)
+        with col_r2:
+            st.dataframe(
+                df_rank.style
+                    .highlight_max(subset=["Total"], color=C["yellow"] + "44")
+                    .format({"Total": "{}", "Operation": "{}",
+                             "Intervention": "{}", "Prozedur": "{}"}),
+                use_container_width=True, hide_index=True)
     else:
-        # Colorear columna Rolle
-        def style_rolle(val):
-            if val == "Operateur": return f"color: {C['accent']}; font-weight: bold"
-            if val == "Assistent": return f"color: {C['accent2']}; font-weight: bold"
-            return ""
-        def style_kat(val):
-            m = {"Operation": C["op"], "Intervention": C["interv"], "Prozedur": C["proz"]}
-            c = m.get(val, C["text"])
-            return f"color: {c}; font-weight: bold"
+        st.info("Noch keine Daten vorhanden.")
+else:
+    st.markdown(f"<h4 style='color:{C['text']}'>📌 Top Eingriffe</h4>",
+                unsafe_allow_html=True)
+    rows = fetch_top_eingriffe(username)
+    if rows:
+        df_top = pd.DataFrame(rows, columns=["Eingriff", "Rolle", "n"])
+        col_t1, col_t2 = st.columns([1.5, 1])
+        with col_t1:
+            fig_top = px.bar(
+                df_top, x="n", y="Eingriff", color="Rolle",
+                orientation="h",
+                color_discrete_map={"Operateur": C["accent"], "Assistent": C["accent2"]},
+            )
+            fig_top.update_layout(**PLOTLY_LAYOUT, height=280,
+                                  showlegend=True,
+                                  xaxis=_axis_style(),
+                                  yaxis=_axis_style(),
+                                  legend=_legend_style(orientation="h", y=-0.3))
+            st.plotly_chart(fig_top, use_container_width=True)
+        with col_t2:
+            st.dataframe(df_top, use_container_width=True, hide_index=True)
+    else:
+        st.info("Noch keine Eingriffe vorhanden.")
 
-        styled = df.style
-        if "Rolle" in df.columns:
-            styled = styled.applymap(style_rolle, subset=["Rolle"])
-        if "Kategorie" in df.columns:
-            styled = styled.applymap(style_kat, subset=["Kategorie"])
-
-        st.dataframe(styled, use_container_width=True, hide_index=True, height=400)
-        st.caption(f"{len(df)} Einträge gefunden.")
-
-    # ── Acciones ──
+# ══════════════════════════════════════════════════════════════════════════════
+# SECCIÓN 2: NUEVA OPERACIÓN (solo residentes)
+# ══════════════════════════════════════════════════════════════════════════════
+if not is_tutor:
     st.divider()
-    a1, a2, a3, a4 = st.columns(4)
-
-    with a1:
-        if not df.empty:
-            csv_buf = io.StringIO()
-            df.to_csv(csv_buf, index=False, encoding="utf-8")
-            st.download_button("📁 CSV herunterladen", csv_buf.getvalue(),
-                               "logbuch.csv", "text/csv",
-                               use_container_width=True)
-    with a2:
-        if not df.empty:
-            pdf_bytes = make_pdf_bytes(df, "Logbuch - Chirurgischer Bericht")
-            st.download_button("📄 PDF herunterladen", pdf_bytes,
-                               "logbuch.pdf", "application/pdf",
-                               use_container_width=True)
-    with a3:
-        if not is_tutor and not df.empty:
-            st.markdown("<p style='font-size:11px;color:{};margin-bottom:4px'>"
-                        "Eintrag löschen (ID):</p>".format(C["muted"]),
-                        unsafe_allow_html=True)
-            del_id = st.number_input("ID", min_value=1, step=1,
-                                     label_visibility="collapsed")
-    with a4:
-        if not is_tutor and not df.empty:
-            if st.button("🗑 Löschen", use_container_width=True, type="secondary"):
-                conn = get_conn()
-                conn.execute("DELETE FROM operationen WHERE user_id=? AND username=?",
-                             (del_id, username))
-                conn.commit()
-                reorder_ids(username)
-                st.success(f"Eintrag {del_id} gelöscht.")
-                st.rerun()
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PÁGINA: NEUE OPERATION
-# ══════════════════════════════════════════════════════════════════════════════
-elif page == "➕ Neue Operation":
-    if is_tutor:
-        st.warning("Im Tutor-Modus können keine Operationen hinzugefügt werden.")
-        st.stop()
-
-    st.markdown(f"<h2 style='color:{C['text']};margin:0 0 16px'>➕ Neue Operation</h2>",
+    st.markdown(f"<h3 style='color:{C['text']};margin:0 0 12px'>➕ Neue Operation eintragen</h3>",
                 unsafe_allow_html=True)
 
     with st.form("form_neue_op", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            datum     = st.text_input("Datum (TT.MM.JJJJ) *")
+        fc1, fc2, fc3, fc4 = st.columns([1.2, 1.5, 1.5, 1])
+        with fc1:
+            datum_dt  = st.date_input("Datum *", value=datetime.today(),
+                                      format="DD.MM.YYYY")
+        with fc2:
             kategorie = st.selectbox("Kategorie *", KATEGORIEN)
+        with fc3:
             eingriff  = st.selectbox("Eingriff *", EINGRIFFE[kategorie])
+        with fc4:
             rolle     = st.selectbox("Rolle *", ["Operateur", "Assistent"])
-        with c2:
+
+        fc5, fc6, fc7 = st.columns(3)
+        with fc5:
             patient_id = st.text_input("Patienten-ID *")
+        with fc6:
             diagnose   = st.text_input("Diagnose *")
+        with fc7:
             notizen    = st.text_input("Notizen")
 
-            zugang, verschlusssystem = "", ""
-            if kategorie == "Intervention":
+        zugang, verschlusssystem = "", ""
+        if kategorie == "Intervention":
+            fi1, fi2 = st.columns(2)
+            with fi1:
                 zugang = st.selectbox("Zugang *", ["Punktion", "Offen"])
+            with fi2:
                 if zugang == "Punktion":
                     verschlusssystem = st.selectbox("Verschlusssystem *",
                                                     ["AngioSeal", "ProGlide"])
@@ -768,10 +665,11 @@ elif page == "➕ Neue Operation":
                                           type="primary")
 
     if submitted:
+        datum_str = datum_dt.strftime("%d.%m.%Y")
+        datum_sort = datum_dt.strftime("%Y-%m-%d")
         errors = []
-        if not date_ok(datum):    errors.append("Datum: TT.MM.JJJJ")
-        if not patient_id:        errors.append("Patienten-ID fehlt")
-        if not diagnose:          errors.append("Diagnose fehlt")
+        if not patient_id: errors.append("Patienten-ID fehlt")
+        if not diagnose:   errors.append("Diagnose fehlt")
         if kategorie == "Intervention" and not zugang:
             errors.append("Zugang fehlt")
         if errors:
@@ -785,8 +683,97 @@ elif page == "➕ Neue Operation":
                 "INSERT INTO operationen (datum,datum_sort,eingriff,rolle,patient_id,"
                 "diagnose,kategorie,zugang,verschlusssystem,notizen,username,user_id) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (datum, to_sort(datum), eingriff, rolle, patient_id,
+                (datum_str, datum_sort, eingriff, rolle, patient_id,
                  diagnose, kategorie, zugang, verschlusssystem, notizen, username, uid))
             conn.commit()
             st.success(f"✓ Operation '{eingriff}' erfolgreich registriert (ID {uid}).")
             st.balloons()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECCIÓN 3: LOGBUCH (siempre visible)
+# ══════════════════════════════════════════════════════════════════════════════
+st.divider()
+st.markdown(f"<h3 style='color:{C['text']};margin:0 0 12px'>📋 Logbuch</h3>",
+            unsafe_allow_html=True)
+
+# ── Filtros ──
+with st.expander("🔍 Suchen & Filtern", expanded=False):
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        filter_kat = st.selectbox("Kategorie", ["Alle"] + KATEGORIEN)
+    with fc2:
+        filter_rolle = st.selectbox("Rolle", ["Alle", "Operateur", "Assistent"])
+    with fc3:
+        if is_tutor:
+            cur = get_cur()
+            cur.execute("SELECT username FROM users")
+            all_users = ["Alle"] + [r[0] for r in cur.fetchall()]
+            filter_user = st.selectbox("Benutzer", all_users)
+        else:
+            filter_user = username
+
+conditions, params = [], ()
+if filter_kat != "Alle":
+    conditions.append("kategorie=?"); params += (filter_kat,)
+if filter_rolle != "Alle":
+    conditions.append("rolle=?"); params += (filter_rolle,)
+if is_tutor and filter_user != "Alle":
+    conditions.append("username=?"); params += (filter_user,)
+
+extra = " AND ".join(conditions)
+df = fetch_ops(username, is_tutor, extra, params)
+
+if df.empty:
+    st.info("Keine Einträge vorhanden.")
+else:
+    def style_rolle(val):
+        if val == "Operateur": return f"color: {C['accent']}; font-weight: bold"
+        if val == "Assistent": return f"color: {C['accent2']}; font-weight: bold"
+        return ""
+    def style_kat(val):
+        m = {"Operation": C["op"], "Intervention": C["interv"], "Prozedur": C["proz"]}
+        c = m.get(val, C["text"])
+        return f"color: {c}; font-weight: bold"
+
+    styled = df.style
+    if "Rolle" in df.columns:
+        styled = styled.applymap(style_rolle, subset=["Rolle"])
+    if "Kategorie" in df.columns:
+        styled = styled.applymap(style_kat, subset=["Kategorie"])
+
+    st.dataframe(styled, use_container_width=True, hide_index=True, height=380)
+    st.caption(f"{len(df)} Einträge gefunden.")
+
+# ── Acciones exportar / borrar ──
+st.divider()
+a1, a2, a3, a4 = st.columns(4)
+
+with a1:
+    if not df.empty:
+        csv_buf = io.StringIO()
+        df.to_csv(csv_buf, index=False, encoding="utf-8")
+        st.download_button("📁 CSV herunterladen", csv_buf.getvalue(),
+                           "logbuch.csv", "text/csv",
+                           use_container_width=True)
+with a2:
+    if not df.empty:
+        pdf_bytes = make_pdf_bytes(df, "Logbuch - Chirurgischer Bericht")
+        st.download_button("📄 PDF herunterladen", pdf_bytes,
+                           "logbuch.pdf", "application/pdf",
+                           use_container_width=True)
+with a3:
+    if not is_tutor and not df.empty:
+        st.markdown(f"<p style='font-size:11px;color:{C['muted']};margin-bottom:4px'>"
+                    "Eintrag löschen (ID):</p>", unsafe_allow_html=True)
+        del_id = st.number_input("ID", min_value=1, step=1,
+                                 label_visibility="collapsed")
+with a4:
+    if not is_tutor and not df.empty:
+        if st.button("🗑 Löschen", use_container_width=True, type="secondary"):
+            conn = get_conn()
+            conn.execute("DELETE FROM operationen WHERE user_id=? AND username=?",
+                         (del_id, username))
+            conn.commit()
+            reorder_ids(username)
+            st.success(f"Eintrag {del_id} gelöscht.")
+            st.rerun()
